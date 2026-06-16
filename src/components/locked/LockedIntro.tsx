@@ -51,12 +51,12 @@ export function LockedIntro() {
           </p>
           <p>
             <strong className="text-foreground">What you can change:</strong> layout, styling,
-            animations, and creative presentation around the portfolio.
+            animations, typography, and creative presentation — including how my facts look.
           </p>
           <p>
-            <strong className="text-foreground">What stays locked:</strong> my experience, education,
-            achievements, and this intro — so visitors always know how to contribute and see who
-            built what.
+            <strong className="text-foreground">What stays locked:</strong> the actual content of my
+            experience, education, and achievements (the words and facts), plus this intro — so
+            visitors always know how to contribute and see who built what.
           </p>
         </div>
 

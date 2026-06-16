@@ -1,8 +1,8 @@
 {
-  "version": 1,
-  "description": "Locked files cannot be changed by community contributors. Only the site owner may update these via a direct commit to main.",
+  "version": 2,
+  "description": "Locked fact data cannot be changed by community contributors. Only the site owner may update these. Presentation (CSS, layout, LockedResume.tsx styling) is open to contributors.",
   "files": [
-    "src/locked/resume.html",
+    "src/locked/experience.json",
     "src/locked/manifest.json",
     "src/components/locked/LockedIntro.tsx"
   ]

@@ -15,15 +15,19 @@ Visitors chat with a Cursor AI agent to design and polish the site. Locked secti
 
 ## Locked content
 
-These files are checksum-protected and **must not** be changed by community PRs:
+**Facts** (checksum-protected — community cannot change):
 
-- `src/locked/resume.html` — unstyled portfolio facts (always visible)
-- `src/locked/manifest.json` — list of locked paths
+- `src/locked/experience.json` — portfolio data (experience, education, projects, skills)
 - `src/components/locked/LockedIntro.tsx` — site concept + attribution name input
+
+**Presentation** (community can style, including the facts section):
+
+- `src/components/locked/LockedResume.tsx` — renders facts; restyle freely
+- `src/app/globals.css` — CSS targeting `#locked-resume` and `.locked-resume-*`
 
 CI runs `npm run verify:locked` on every PR.
 
-**Owner only:** after editing locked files, regenerate checksums:
+**Owner only:** after editing locked fact files, regenerate checksums:
 
 ```bash
 npm run lock:checksum
@@ -45,4 +49,6 @@ Static export via `output: "export"`. Build command: `npm run build`. Output dir
 
 ## Updating your resume
 
-Edit `src/locked/resume.html` directly (plain HTML), then run `npm run lock:checksum` and commit both files.
+Edit `src/locked/experience.json` (the fact data), then run `npm run lock:checksum` and commit both files.
+
+Contributors may restyle how facts appear via `LockedResume.tsx` and CSS — they cannot change the JSON content.

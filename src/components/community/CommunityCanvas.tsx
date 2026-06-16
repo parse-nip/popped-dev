@@ -20,7 +20,7 @@ export function CommunityCanvas() {
             </div>
             <CardDescription>
               The first visitor starts from this empty canvas. Use the chat agent to describe a
-              layout, theme, or animation — preview it, then confirm to open a pull request.
+              layout, theme, or animation — including how the portfolio facts above should look.
             </CardDescription>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
