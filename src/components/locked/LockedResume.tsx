@@ -12,7 +12,12 @@ export function LockedResume() {
     <section id="locked-resume" data-facts="true" aria-label="Portfolio facts">
       <article className="locked-resume">
           <header className="locked-resume-header">
-            <h1 data-fact-id="profile-name">{data.profile.name}</h1>
+            <h1
+              data-fact-id="profile-name"
+              data-contribution-id="profile-name-papyrus"
+            >
+              {data.profile.name}
+            </h1>
             <p data-fact-id="profile-tagline">{data.profile.tagline}</p>
             <p
               className="locked-resume-links"
