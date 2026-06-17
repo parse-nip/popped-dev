@@ -45,6 +45,16 @@ export function DesignSelectLayerActive() {
   const [chat, setChat] = useState<ChatState | null>(null);
   const [highlight, setHighlight] = useState<Rect | null>(null);
 
+  const handlePreviewReady = useCallback(
+    (params: Parameters<typeof showPreview>[0]) => {
+      showPreview(params);
+      setChat(null);
+      setHover(null);
+      setHighlight(null);
+    },
+    [showPreview],
+  );
+
   useEffect(() => {
     document.body.dataset.cursorMode = "design";
     return () => {
@@ -164,7 +174,7 @@ export function DesignSelectLayerActive() {
           elementLabel={chat.label}
           elementContext={buildElementContext(chat.element)}
           onClose={clearSelection}
-          onPreviewReady={showPreview}
+          onPreviewReady={handlePreviewReady}
         />
       ) : null}
     </>,

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
 import {
+  fetchPreviewUrl,
   sendAgentMessage,
   streamAgentRun,
   type AgentStreamEvent,
@@ -34,6 +35,14 @@ const POPUP_MAX_WIDTH = 480;
 const POPUP_FALLBACK_HEIGHT = 132;
 const VIEWPORT_PADDING = 12;
 const ANCHOR_OVERLAP = 14;
+
+type PopupPhase = "input" | "running" | "complete";
+
+type RunMeta = {
+  runId: string;
+  agentId: string;
+  branch: string;
+};
 
 type PopupLayout = { left: number; top: number; width: number };
 
@@ -169,8 +178,12 @@ export function ElementChatPopup({
   const dictationBaseRef = useRef("");
   const streamCleanupRef = useRef<(() => void) | null>(null);
   const assistantBufferRef = useRef("");
+  const runMetaRef = useRef<RunMeta | null>(null);
+  const previewOpenedRef = useRef(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [submittedPrompt, setSubmittedPrompt] = useState("");
+  const [phase, setPhase] = useState<PopupPhase>("input");
   const [isThinking, setIsThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const dictationSupported =
@@ -180,8 +193,9 @@ export function ElementChatPopup({
   const [dictationError, setDictationError] = useState<string | null>(null);
   const [layout, setLayout] = useState<PopupLayout>(() => getPopupLayout(anchorRect));
   const [contributorName, setContributorName] = useState(readContributorName);
-  const hasThread = messages.length > 0 || isThinking;
+  const hasThread = phase === "running" && (messages.length > 0 || isThinking);
   const needsName = contributorName.trim().length < 2;
+  const isLocked = phase === "running" || phase === "complete";
 
   useEffect(() => subscribeContributorName(setContributorName), []);
 
@@ -223,6 +237,34 @@ export function ElementChatPopup({
     });
   }, []);
 
+  const openPreview = useCallback(
+    async (previewUrl?: string) => {
+      if (previewOpenedRef.current) return;
+      const meta = runMetaRef.current;
+      if (!meta) return;
+
+      try {
+        const resolvedUrl = previewUrl ?? (await fetchPreviewUrl(meta.branch)).previewUrl;
+        previewOpenedRef.current = true;
+        onPreviewReady({
+          previewUrl: resolvedUrl,
+          branch: meta.branch,
+          runId: meta.runId,
+          agentId: meta.agentId,
+        });
+      } catch {
+        appendMessage("status", "Preview is still building — try again in a moment.");
+      }
+    },
+    [appendMessage, onPreviewReady],
+  );
+
+  const finishRun = useCallback(() => {
+    setIsThinking(false);
+    setPhase("complete");
+    void openPreview();
+  }, [openPreview]);
+
   const handleStreamEvent = useCallback(
     (event: AgentStreamEvent, runId: string, agentId: string) => {
       if (event.type === "assistant") {
@@ -237,13 +279,9 @@ export function ElementChatPopup({
       }
 
       if (event.type === "preview") {
-        appendMessage("status", "Preview ready — opening draft (Pages may take a minute to build)…");
-        onPreviewReady({
-          previewUrl: event.previewUrl,
-          branch: event.branch,
-          runId,
-          agentId,
-        });
+        setPhase("complete");
+        setIsThinking(false);
+        void openPreview(event.previewUrl);
         return;
       }
 
@@ -253,15 +291,16 @@ export function ElementChatPopup({
           return;
         }
         appendMessage("status", event.message);
+        setPhase("complete");
         setIsThinking(false);
         return;
       }
 
       if (event.type === "done") {
-        setIsThinking(false);
+        finishRun();
       }
     },
-    [appendMessage, onPreviewReady, updateAssistantMessage],
+    [appendMessage, finishRun, openPreview, updateAssistantMessage],
   );
 
   const stopDictation = useCallback(() => {
@@ -344,13 +383,13 @@ export function ElementChatPopup({
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        stopDictation();
-        onClose();
-      }
+      if (event.key !== "Escape" || isLocked) return;
+      stopDictation();
+      onClose();
     }
 
     function handlePointerDown(event: PointerEvent) {
+      if (isLocked) return;
       const target = event.target;
       if (!(target instanceof Node) || popupRef.current?.contains(target)) {
         return;
@@ -366,7 +405,7 @@ export function ElementChatPopup({
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("pointerdown", handlePointerDown);
     };
-  }, [onClose, stopDictation]);
+  }, [isLocked, onClose, stopDictation]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -397,15 +436,19 @@ export function ElementChatPopup({
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    setSubmittedPrompt(trimmed);
     setInput("");
+    setPhase("running");
     setIsThinking(true);
     appendMessage("status", "Sending to agent…");
 
     try {
-      const { runId, agentId } = await sendAgentMessage({
+      const { runId, agentId, branch } = await sendAgentMessage({
         message: trimmed,
         elementContext,
       });
+
+      runMetaRef.current = { runId, agentId, branch };
 
       streamCleanupRef.current = streamAgentRun(runId, agentId, (event) => {
         handleStreamEvent(event, runId, agentId);
@@ -413,6 +456,7 @@ export function ElementChatPopup({
     } catch (error) {
       const message = error instanceof Error ? error.message : "Agent request failed.";
       appendMessage("status", message);
+      setPhase("complete");
       setIsThinking(false);
     }
   }
@@ -463,107 +507,127 @@ export function ElementChatPopup({
           <ComponentTagIcon />
           <span className="element-chat-popup-tag-label">{elementLabel}</span>
         </div>
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(event) => setInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder=""
-          disabled={isThinking}
-          aria-label="Message to design agent"
-          className="element-chat-popup-input"
-        />
-        <button
-          type="button"
-          onClick={handleSend}
-          disabled={!input.trim() || isThinking}
-          className="element-chat-popup-send"
-          aria-label="Send message"
-        >
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
-            <path
-              d="M6.5 10.5V2.5M6.5 2.5L3.5 5.5M6.5 2.5L9.5 5.5"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+        {phase === "input" ? (
+          <>
+            <input
+              ref={inputRef}
+              type="text"
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder="Describe your design change…"
+              disabled={isThinking}
+              aria-label="Message to design agent"
+              className="element-chat-popup-input"
             />
-          </svg>
-        </button>
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!input.trim() || isThinking}
+              className="element-chat-popup-send"
+              aria-label="Send message"
+            >
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true">
+                <path
+                  d="M6.5 10.5V2.5M6.5 2.5L3.5 5.5M6.5 2.5L9.5 5.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </>
+        ) : (
+          <p className="element-chat-popup-prompt-readonly">{submittedPrompt}</p>
+        )}
       </div>
 
       <div className="element-chat-popup-toolbar">
-        <button
-          type="button"
-          className="element-chat-popup-icon-btn element-chat-popup-icon-btn--muted"
-          aria-label="Close"
-          onClick={() => {
-            stopDictation();
-            onClose();
-          }}
-        >
-          <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
-            <path
-              d="M2.75 2.75L8.25 8.25M8.25 2.75L2.75 8.25"
-              stroke="currentColor"
-              strokeWidth="1.25"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+        {!isLocked ? (
+          <button
+            type="button"
+            className="element-chat-popup-icon-btn element-chat-popup-icon-btn--muted"
+            aria-label="Close"
+            onClick={() => {
+              stopDictation();
+              onClose();
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+              <path
+                d="M2.75 2.75L8.25 8.25M8.25 2.75L2.75 8.25"
+                stroke="currentColor"
+                strokeWidth="1.25"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        ) : (
+          <span className="element-chat-popup-locked-hint" aria-live="polite">
+            {phase === "complete" ? "Done" : "Agent working…"}
+          </span>
+        )}
 
         <span className="element-chat-popup-model">Composer 2.5 Fast</span>
 
-        <button
-          type="button"
-          className={`element-chat-popup-icon-btn element-chat-popup-icon-btn--muted${isListening ? " element-chat-popup-icon-btn--listening" : ""}${dictationError ? " element-chat-popup-icon-btn--error" : ""}`}
-          aria-label={isListening ? "Stop dictation" : "Start dictation"}
-          aria-pressed={isListening}
-          disabled={!dictationSupported || isThinking}
-          title={
-            dictationError ??
-            (dictationSupported
-              ? isListening
-                ? "Stop dictation"
-                : "Start dictation"
-              : "Dictation is not supported in this browser")
-          }
-          onClick={toggleDictation}
-        >
-          <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
-            <rect x="5.25" y="1.5" width="4.5" height="7.5" rx="2.25" stroke="currentColor" strokeWidth="1.15" />
-            <path
-              d="M3 7.75C3 9.85 4.9 11.75 7.5 11.75C10.1 11.75 12 9.85 12 7.75M7.5 11.75V13.25"
-              stroke="currentColor"
-              strokeWidth="1.15"
-              strokeLinecap="round"
-            />
-          </svg>
-        </button>
+        {phase === "input" ? (
+          <button
+            type="button"
+            className={`element-chat-popup-icon-btn element-chat-popup-icon-btn--muted${isListening ? " element-chat-popup-icon-btn--listening" : ""}${dictationError ? " element-chat-popup-icon-btn--error" : ""}`}
+            aria-label={isListening ? "Stop dictation" : "Start dictation"}
+            aria-pressed={isListening}
+            disabled={!dictationSupported || isThinking}
+            title={
+              dictationError ??
+              (dictationSupported
+                ? isListening
+                  ? "Stop dictation"
+                  : "Start dictation"
+                : "Dictation is not supported in this browser")
+            }
+            onClick={toggleDictation}
+          >
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none" aria-hidden="true">
+              <rect x="5.25" y="1.5" width="4.5" height="7.5" rx="2.25" stroke="currentColor" strokeWidth="1.15" />
+              <path
+                d="M3 7.75C3 9.85 4.9 11.75 7.5 11.75C10.1 11.75 12 9.85 12 7.75M7.5 11.75V13.25"
+                stroke="currentColor"
+                strokeWidth="1.15"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+        ) : phase === "complete" ? (
+          <button
+            type="button"
+            className="element-chat-popup-view-preview"
+            onClick={() => void openPreview()}
+          >
+            View preview
+          </button>
+        ) : (
+          <span className="element-chat-popup-toolbar-spacer" aria-hidden="true" />
+        )}
       </div>
 
       {hasThread ? (
         <div className="element-chat-popup-thread">
-          {messages.map((message) => (
-            <p
-              key={message.id}
-              className={
-                message.role === "user"
-                  ? "element-chat-popup-line element-chat-popup-line--user"
-                  : message.role === "status"
-                    ? "element-chat-popup-line element-chat-popup-line--status"
-                    : "element-chat-popup-line element-chat-popup-line--assistant"
-              }
-            >
-              {message.content}
-            </p>
-          ))}
+          {messages
+            .filter((message) => message.role === "status")
+            .map((message) => (
+              <p
+                key={message.id}
+                className="element-chat-popup-line element-chat-popup-line--status"
+              >
+                {message.content}
+              </p>
+            ))}
           {isThinking ? <p className="element-chat-popup-line element-chat-popup-line--status">…</p> : null}
         </div>
       ) : null}
