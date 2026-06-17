@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   sendAgentMessage,
   streamAgentRun,
@@ -29,9 +29,63 @@ type ElementChatPopupProps = {
 
 const POPUP_MIN_WIDTH = 360;
 const POPUP_MAX_WIDTH = 480;
-const POPUP_ESTIMATED_HEIGHT = 96;
+const POPUP_FALLBACK_HEIGHT = 132;
 const VIEWPORT_PADDING = 12;
 const ANCHOR_OVERLAP = 14;
+
+type PopupLayout = { left: number; top: number; width: number };
+
+function computePopupWidth(anchorRect: ElementChatPopupProps["anchorRect"]): number {
+  if (typeof window === "undefined") {
+    return POPUP_MIN_WIDTH;
+  }
+
+  return Math.min(
+    POPUP_MAX_WIDTH,
+    Math.max(POPUP_MIN_WIDTH, anchorRect.width),
+    window.innerWidth - VIEWPORT_PADDING * 2,
+  );
+}
+
+function computePopupLayout(
+  anchorRect: ElementChatPopupProps["anchorRect"],
+  popupHeight: number,
+): PopupLayout {
+  if (typeof window === "undefined") {
+    return {
+      left: anchorRect.left,
+      top: anchorRect.top + anchorRect.height - ANCHOR_OVERLAP,
+      width: POPUP_MIN_WIDTH,
+    };
+  }
+
+  const width = computePopupWidth(anchorRect);
+  const height = Math.min(
+    popupHeight,
+    window.innerHeight - VIEWPORT_PADDING * 2,
+  );
+
+  let left = anchorRect.left;
+  const maxLeft = window.innerWidth - width - VIEWPORT_PADDING;
+  left = Math.max(VIEWPORT_PADDING, Math.min(left, maxLeft));
+
+  const belowTop = anchorRect.top + anchorRect.height - ANCHOR_OVERLAP;
+  const aboveTop = anchorRect.top - height + ANCHOR_OVERLAP;
+  const spaceBelow = window.innerHeight - VIEWPORT_PADDING - belowTop;
+  const spaceAbove = anchorRect.top - VIEWPORT_PADDING;
+
+  let top: number;
+  if (height <= spaceBelow || spaceBelow >= spaceAbove) {
+    top = belowTop;
+  } else {
+    top = aboveTop;
+  }
+
+  const maxTop = window.innerHeight - VIEWPORT_PADDING - height;
+  top = Math.max(VIEWPORT_PADDING, Math.min(top, maxTop));
+
+  return { left, top, width };
+}
 
 type SpeechRecognitionResultList = {
   length: number;
@@ -74,26 +128,7 @@ function getSpeechRecognitionCtor(): (new () => SpeechRecognitionLike) | null {
 }
 
 function getPopupLayout(anchorRect: ElementChatPopupProps["anchorRect"]) {
-  if (typeof window === "undefined") {
-    return { left: anchorRect.left, top: anchorRect.top + anchorRect.height - ANCHOR_OVERLAP, width: POPUP_MIN_WIDTH };
-  }
-
-  const width = Math.min(
-    POPUP_MAX_WIDTH,
-    Math.max(POPUP_MIN_WIDTH, anchorRect.width),
-    window.innerWidth - VIEWPORT_PADDING * 2,
-  );
-
-  let left = anchorRect.left;
-  let top = anchorRect.top + anchorRect.height - ANCHOR_OVERLAP;
-
-  const maxLeft = window.innerWidth - width - VIEWPORT_PADDING;
-  left = Math.max(VIEWPORT_PADDING, Math.min(left, maxLeft));
-
-  const maxTop = window.innerHeight - POPUP_ESTIMATED_HEIGHT - VIEWPORT_PADDING;
-  top = Math.max(VIEWPORT_PADDING, Math.min(top, maxTop));
-
-  return { left, top, width };
+  return computePopupLayout(anchorRect, POPUP_FALLBACK_HEIGHT);
 }
 
 function buildTranscript(event: SpeechRecognitionResultEvent) {
@@ -141,8 +176,27 @@ export function ElementChatPopup({
     getSpeechRecognitionCtor() !== null &&
     typeof navigator.mediaDevices?.getUserMedia === "function";
   const [dictationError, setDictationError] = useState<string | null>(null);
-  const layout = getPopupLayout(anchorRect);
+  const [layout, setLayout] = useState<PopupLayout>(() => getPopupLayout(anchorRect));
   const hasThread = messages.length > 0 || isThinking;
+
+  const syncPopupLayout = useCallback(() => {
+    const height = popupRef.current?.offsetHeight ?? POPUP_FALLBACK_HEIGHT;
+    setLayout(computePopupLayout(anchorRect, height));
+  }, [anchorRect]);
+
+  useLayoutEffect(() => {
+    syncPopupLayout();
+  }, [syncPopupLayout, messages, isThinking, hasThread]);
+
+  useEffect(() => {
+    const schedule = () => syncPopupLayout();
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, true);
+    return () => {
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
+    };
+  }, [syncPopupLayout]);
 
   const appendMessage = useCallback((role: Message["role"], content: string) => {
     setMessages((prev) => [...prev, { id: crypto.randomUUID(), role, content }]);
