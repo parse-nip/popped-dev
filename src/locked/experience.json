@@ -1,0 +1,116 @@
+{
+  "profile": {
+    "name": "parse-nip",
+    "tagline": "Developer building tools, games, data systems, and experiments on the web.",
+    "links": [
+      { "label": "github.com/parse-nip", "href": "https://github.com/parse-nip" },
+      { "label": "popped.dev", "href": "https://popped.dev" }
+    ]
+  },
+  "about": "I ship full-stack and systems projects across TypeScript, Rust, Python, and more. I care about developer experience, pragmatic tooling, and projects that are fun to build and useful in practice. This site is a community-built portfolio — the facts below stay fixed; style them however you like.",
+  "experience": [
+    {
+      "id": "exp-independent",
+      "title": "Independent Developer",
+      "period": { "start": "2023", "end": null, "label": "2023 — present" },
+      "description": "Designing and shipping personal and open-source projects: vector databases, game prototypes, data tooling, certificate systems, and web apps deployed on Cloudflare Pages."
+    },
+    {
+      "id": "exp-oss",
+      "title": "Open Source Contributor",
+      "period": { "start": "2025", "end": null, "label": "2025 — present" },
+      "description": "Contributed to projects including OpenScreen (screen recording tooling) and other community repositories."
+    }
+  ],
+  "education": [
+    {
+      "id": "edu-cs",
+      "title": "Computer Science",
+      "details": [
+        "Coursework includes systems and programming labs (e.g. CS106).",
+        "Ongoing — update this section with your institution and dates."
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "id": "proj-vector-baby",
+      "name": "vector-baby",
+      "href": "https://github.com/parse-nip/vector-baby",
+      "description": "Custom vector database — Rust."
+    },
+    {
+      "id": "proj-to-the-moon",
+      "name": "to-the-moon",
+      "href": "https://github.com/parse-nip/to-the-moon",
+      "description": "To The Moon — a Godot 4 physics/build game."
+    },
+    {
+      "id": "proj-buffet-clearers",
+      "name": "buffet-clearers-overengineered",
+      "href": "https://github.com/parse-nip/buffet-clearers-overengineered",
+      "description": "Telegram chat analytics: features, matplotlib graphs, sklearn models."
+    },
+    {
+      "id": "proj-yc",
+      "name": "yc",
+      "href": "https://github.com/parse-nip/yc",
+      "description": "Data tooling and exploration around Y Combinator companies."
+    },
+    {
+      "id": "proj-ecert",
+      "name": "ECERT_NEW",
+      "href": "https://github.com/parse-nip/ECERT_NEW",
+      "description": "OpenAttestation batch issuance and embedded certificate renderer."
+    },
+    {
+      "id": "proj-glhf",
+      "name": "glhf-name-sales",
+      "href": "https://github.com/parse-nip/glhf-name-sales",
+      "description": "Commerce tooling for GLHF name sales."
+    },
+    {
+      "id": "proj-koshergpt",
+      "name": "koshergpt",
+      "href": "https://github.com/parse-nip/koshergpt",
+      "description": "AI application experiment — TypeScript."
+    },
+    {
+      "id": "proj-invidious",
+      "name": "BetterInvidious",
+      "href": "https://github.com/parse-nip/BetterInvidious",
+      "description": "Invidious instance with improved UI — Crystal."
+    },
+    {
+      "id": "proj-trains",
+      "name": "trains.popped.dev",
+      "href": "https://trains.popped.dev",
+      "description": "Fullscreen Japanese train ambience — Cloudflare Pages."
+    },
+    {
+      "id": "proj-popped-dev",
+      "name": "popped-dev",
+      "href": "https://github.com/parse-nip/popped-dev",
+      "description": "This site — community-built developer portfolio at popped.dev."
+    }
+  ],
+  "skills": [
+    "Languages: TypeScript, JavaScript, Rust, Python, GDScript, Crystal",
+    "Frontend: React, Next.js, HTML/CSS",
+    "Backend & data: Node.js, vector search, ML/sklearn, REST APIs",
+    "Game dev: Godot 4",
+    "Infra & deploy: Cloudflare Pages, Docker",
+    "Tools: Git, GitHub, Cursor AI agents"
+  ],
+  "achievements": [
+    "34+ public repositories on GitHub since 2023",
+    "buffet-clearers-overengineered — 8 stars; end-to-end Telegram analytics pipeline with visualization and ML models",
+    "Built and deployed multiple popped.dev subdomains (trains.popped.dev, popped.dev)",
+    "Active open-source contributor across TypeScript, Rust, and Python codebases",
+    "Shipped certificate issuance tooling with OpenAttestation"
+  ],
+  "contact": [
+    { "label": "GitHub", "value": "@parse-nip", "href": "https://github.com/parse-nip" },
+    { "label": "Website", "value": "popped.dev", "href": "https://popped.dev" }
+  ]
+}
