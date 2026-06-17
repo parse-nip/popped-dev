@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ContributorNameControl } from "@/components/community/ContributorNameControl";
 import {
   sendAgentMessage,
   streamAgentRun,
   type AgentStreamEvent,
 } from "@/lib/agent-client";
+import { readContributorName, subscribeContributorName } from "@/lib/contributor-name";
 import type { ElementContext } from "@/lib/element-context";
 
 type Message = {
@@ -177,7 +179,11 @@ export function ElementChatPopup({
     typeof navigator.mediaDevices?.getUserMedia === "function";
   const [dictationError, setDictationError] = useState<string | null>(null);
   const [layout, setLayout] = useState<PopupLayout>(() => getPopupLayout(anchorRect));
+  const [contributorName, setContributorName] = useState(readContributorName);
   const hasThread = messages.length > 0 || isThinking;
+  const needsName = contributorName.trim().length < 2;
+
+  useEffect(() => subscribeContributorName(setContributorName), []);
 
   const syncPopupLayout = useCallback(() => {
     const height = popupRef.current?.offsetHeight ?? POPUP_FALLBACK_HEIGHT;
@@ -199,7 +205,12 @@ export function ElementChatPopup({
   }, [syncPopupLayout]);
 
   const appendMessage = useCallback((role: Message["role"], content: string) => {
-    setMessages((prev) => [...prev, { id: crypto.randomUUID(), role, content }]);
+    setMessages((prev) => {
+      if (role === "status" && prev.at(-1)?.role === "status" && prev.at(-1)?.content === content) {
+        return prev;
+      }
+      return [...prev, { id: crypto.randomUUID(), role, content }];
+    });
   }, []);
 
   const updateAssistantMessage = useCallback((content: string) => {
@@ -226,7 +237,7 @@ export function ElementChatPopup({
       }
 
       if (event.type === "preview") {
-        appendMessage("status", "Preview ready — loading draft…");
+        appendMessage("status", "Preview ready — opening draft (Pages may take a minute to build)…");
         onPreviewReady({
           previewUrl: event.previewUrl,
           branch: event.branch,
@@ -237,6 +248,10 @@ export function ElementChatPopup({
       }
 
       if (event.type === "error") {
+        if (/no longer available|stream_expired|connection to agent stream lost/i.test(event.message)) {
+          appendMessage("status", "Stream ended — checking final result…");
+          return;
+        }
         appendMessage("status", event.message);
         setIsThinking(false);
         return;
@@ -384,6 +399,7 @@ export function ElementChatPopup({
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsThinking(true);
+    appendMessage("status", "Sending to agent…");
 
     try {
       const { runId, agentId } = await sendAgentMessage({
@@ -438,6 +454,10 @@ export function ElementChatPopup({
       role="dialog"
       aria-label={`Design chat for ${elementLabel}`}
     >
+      {needsName ? (
+        <ContributorNameControl variant="prompt" id="contributor-name-chat" />
+      ) : (
+        <>
       <div className="element-chat-popup-body">
         <div className="element-chat-popup-tag">
           <ComponentTagIcon />
@@ -547,6 +567,8 @@ export function ElementChatPopup({
           {isThinking ? <p className="element-chat-popup-line element-chat-popup-line--status">…</p> : null}
         </div>
       ) : null}
+        </>
+      )}
     </div>
   );
 }

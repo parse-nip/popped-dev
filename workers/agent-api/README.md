@@ -26,10 +26,10 @@ System prompts embed `AGENTS.md` rules (facts from `experience.json` only, style
 When the cloud agent pushes branch `cursor/design/{sessionId}`, Cloudflare Pages builds a preview deployment. Branch alias URL:
 
 ```text
-https://cursor-design-{sessionId}--popped-dev.pages.dev
+https://cursor-design-{sessionId-prefix}.popped-dev.pages.dev
 ```
 
-Normalization: `/` → `-`, lowercase. Confirm the exact alias after the first branch deploy in **Cloudflare Pages → project → View build → Aliases**.
+Normalization: `/` → `-`, lowercase, truncate to ~28 chars. The Worker also reads the exact URL from GitHub Cloudflare Pages check runs when available.
 
 Hash-based preview URLs (`abc123.popped-dev.pages.dev`) are commit-specific; branch aliases update on each push — use aliases for the design iframe.
 
@@ -57,6 +57,7 @@ Set via `wrangler secret put` or the Cloudflare dashboard:
 | Name | Required | Description |
 |---|---|---|
 | `CURSOR_API_KEY` | Yes | Cursor team service-account API key |
+| `GITHUB_TOKEN` | Yes | GitHub PAT with `contents: write` to create `cursor/design/*` branches before agent start |
 | `SESSIONS` KV | Yes | Session + run metadata + rate limits |
 
 `wrangler.toml` vars (override in dashboard if needed):
@@ -65,13 +66,10 @@ Set via `wrangler secret put` or the Cloudflare dashboard:
 |---|---|---|
 | `PAGES_PROJECT_NAME` | `popped-dev` | CF Pages project for preview URL construction |
 | `GITHUB_REPO_URL` | `https://github.com/parse-nip/popped-dev` | Cloud agent repo |
+| `GITHUB_DEFAULT_BRANCH` | `main` | Base ref when creating session branches |
 | `CORS_ORIGIN` | `https://popped.dev` | Allowed origin (`localhost` allowed in dev) |
 
-Optional:
-
-| Name | Description |
-|---|---|
-| `GITHUB_TOKEN` | Only if you add explicit deploy-status polling beyond Pages Git integration |
+`GITHUB_TOKEN` is required because Cursor's `workOnCurrentBranch: true` needs the session branch (`cursor/design/{sessionId}`) to already exist on GitHub. The Worker creates it from `GITHUB_DEFAULT_BRANCH` before calling the Cursor API.
 
 ### Create KV namespace
 
@@ -84,6 +82,7 @@ npx wrangler kv namespace create SESSIONS
 
 ```bash
 npx wrangler secret put CURSOR_API_KEY
+npx wrangler secret put GITHUB_TOKEN
 npx wrangler deploy
 ```
 
@@ -104,6 +103,25 @@ See [`docs/TESTING-AND-RESET.md`](../../docs/TESTING-AND-RESET.md) and `scripts/
 - Contributor name required (matches `popped.dev:contributor-name` in localStorage)
 - Rate limit: 5 runs/hour per IP + session (KV)
 - `CURSOR_API_KEY` never sent to the browser
+
+## Automatic cleanup
+
+A cron trigger runs hourly (`0 * * * *`) and removes abandoned design sessions:
+
+| What | When |
+|---|---|
+| `cursor/design/*` Git branch | No activity for `CLEANUP_TTL_MS` (default **1 hour**) |
+| Session + run KV keys | Same TTL, refreshed on each message |
+| Branches with open PRs | **Kept** (also marked `protected` on submit) |
+| Orphan branches (no KV session) | Deleted if no open PR |
+
+Tune TTL in `wrangler.toml`:
+
+```toml
+CLEANUP_TTL_MS = "3600000"  # 1 hour in ms
+```
+
+Manual reset still available via `scripts/reset-test-state.sh`.
 
 ## Prerequisites checklist
 

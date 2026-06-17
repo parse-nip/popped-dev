@@ -1,4 +1,4 @@
-import { ATTRIBUTION_KEY } from "@/components/locked/LockedIntro";
+import { readContributorName } from "@/lib/contributor-name";
 import type { ElementContext } from "./element-context";
 
 const SESSION_ID_KEY = "popped.dev:agent-session-id";
@@ -8,7 +8,11 @@ const AGENT_ID_KEY = "popped.dev:agent-id";
 const PAGES_AGENT_API = "https://popped-dev-agent-api.parse-nip.workers.dev";
 
 function isPagesDevHost(hostname: string): boolean {
-  return hostname === "popped-dev.pages.dev" || hostname.endsWith("--popped-dev.pages.dev");
+  return (
+    hostname === "popped-dev.pages.dev" ||
+    hostname.endsWith("--popped-dev.pages.dev") ||
+    hostname.endsWith(".popped-dev.pages.dev")
+  );
 }
 
 function getApiBase(): string {
@@ -29,12 +33,7 @@ function apiUrl(path: string): string {
 
 export function getContributorName(): string {
   if (typeof window === "undefined") return "";
-
-  const stored = localStorage.getItem(ATTRIBUTION_KEY)?.trim();
-  if (stored) return stored;
-
-  const input = document.getElementById("contributor-name") as HTMLInputElement | null;
-  return input?.value.trim() ?? "";
+  return readContributorName();
 }
 
 export function getSessionId(): string {
@@ -63,6 +62,64 @@ export type AgentStreamEvent =
   | { type: "preview"; previewUrl: string; branch: string }
   | { type: "error"; message: string }
   | { type: "done" };
+
+export type RunStatusPayload = {
+  runId: string;
+  agentId: string;
+  status: string;
+  result?: string | null;
+  branch?: string;
+  previewUrl?: string;
+  done: boolean;
+};
+
+export async function fetchRunStatus(runId: string, agentId: string): Promise<RunStatusPayload> {
+  const response = await fetch(
+    apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}?agentId=${encodeURIComponent(agentId)}`),
+  );
+  if (!response.ok) {
+    throw new Error("Could not fetch agent run status.");
+  }
+  return (await response.json()) as RunStatusPayload;
+}
+
+async function pollRunUntilDone(
+  runId: string,
+  agentId: string,
+  onEvent: (event: AgentStreamEvent) => void,
+  flags: { previewReceived: boolean; assistantSent: boolean },
+  maxAttempts = 90,
+): Promise<void> {
+  onEvent({ type: "status", message: "Checking agent progress…" });
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const data = await fetchRunStatus(runId, agentId);
+
+    if (data.result && !flags.assistantSent) {
+      flags.assistantSent = true;
+      onEvent({ type: "assistant", text: data.result });
+    }
+
+    if (data.previewUrl && data.branch && !flags.previewReceived) {
+      flags.previewReceived = true;
+      onEvent({ type: "preview", previewUrl: data.previewUrl, branch: data.branch });
+      onEvent({ type: "status", message: "Opening preview…" });
+    }
+
+    if (data.done) {
+      if (data.status === "ERROR") {
+        onEvent({ type: "error", message: "Agent run failed." });
+      }
+      onEvent({ type: "done" });
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  onEvent({ type: "error", message: "Agent run timed out." });
+  onEvent({ type: "done" });
+}
 
 export async function ensureSession(): Promise<{
   sessionId: string;
@@ -139,7 +196,27 @@ export function streamAgentRun(
   agentId: string,
   onEvent: (event: AgentStreamEvent) => void,
 ): () => void {
-  const source = new EventSource(
+  const flags = { previewReceived: false, assistantSent: false, doneReceived: false, closed: false };
+  let source: EventSource | null = null;
+
+  const finish = () => {
+    if (flags.closed) return;
+    flags.closed = true;
+    source?.close();
+    source = null;
+  };
+
+  const maybePoll = () => {
+    if (flags.doneReceived || flags.closed) return;
+    void pollRunUntilDone(runId, agentId, (event) => {
+      if (event.type === "preview") flags.previewReceived = true;
+      if (event.type === "assistant") flags.assistantSent = true;
+      if (event.type === "done") flags.doneReceived = true;
+      onEvent(event);
+    }, flags).finally(finish);
+  };
+
+  source = new EventSource(
     apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}/stream?agentId=${encodeURIComponent(agentId)}`),
   );
 
@@ -147,6 +224,7 @@ export function streamAgentRun(
     try {
       const data = JSON.parse(event.data) as { text?: string };
       if (data.text) {
+        flags.assistantSent = true;
         onEvent({ type: "assistant", text: data.text });
       }
     } catch {
@@ -170,6 +248,7 @@ export function streamAgentRun(
     try {
       const data = JSON.parse(event.data) as { previewUrl?: string; branch?: string };
       if (data.previewUrl && data.branch) {
+        flags.previewReceived = true;
         onEvent({ type: "preview", previewUrl: data.previewUrl, branch: data.branch });
       }
     } catch {
@@ -178,28 +257,50 @@ export function streamAgentRun(
   });
 
   source.addEventListener("error", (event) => {
+    if (flags.doneReceived || flags.closed) return;
+
     if (event instanceof MessageEvent && event.data) {
       try {
         const data = JSON.parse(event.data) as { message?: string };
-        onEvent({ type: "error", message: data.message ?? "Stream error" });
+        const message = data.message ?? "Stream error";
+        if (/no longer available|stream_expired|stream expired/i.test(message)) {
+          maybePoll();
+          return;
+        }
+        onEvent({ type: "error", message });
         return;
       } catch {
         // fall through
       }
     }
-    onEvent({ type: "error", message: "Connection to agent stream lost." });
+
+    if (!flags.previewReceived) {
+      maybePoll();
+      return;
+    }
+
+    if (!flags.doneReceived) {
+      onEvent({ type: "done" });
+      flags.doneReceived = true;
+    }
+    finish();
   });
 
   source.addEventListener("done", () => {
+    if (flags.doneReceived) return;
+    flags.doneReceived = true;
     onEvent({ type: "done" });
-    source.close();
+    finish();
   });
 
   source.addEventListener("result", () => {
+    if (flags.doneReceived) return;
+    flags.doneReceived = true;
     onEvent({ type: "done" });
+    finish();
   });
 
-  return () => source.close();
+  return finish;
 }
 
 async function pollRun(runId: string, agentId: string, maxAttempts = 60) {
@@ -270,12 +371,33 @@ export async function submitForReview(params: {
   };
 }
 
+export async function fetchPreviewUrl(branch: string): Promise<{
+  previewUrl: string;
+  ready: boolean;
+  branch: string;
+}> {
+  const response = await fetch(
+    apiUrl(`/api/agent/preview?branch=${encodeURIComponent(branch)}`),
+  );
+  if (!response.ok) {
+    throw new Error("Could not resolve preview URL.");
+  }
+  return (await response.json()) as {
+    previewUrl: string;
+    ready: boolean;
+    branch: string;
+  };
+}
+
+/** @deprecated Use fetchPreviewUrl; kept for local fallback display. */
 export function branchToPreviewUrl(branch: string): string {
   const alias = branch
     .toLowerCase()
     .replace(/\//g, "-")
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
-  return `https://${alias}--popped-dev.pages.dev`;
+    .replace(/^-|-$/g, "")
+    .slice(0, 28)
+    .replace(/-$/, "");
+  return `https://${alias}.popped-dev.pages.dev`;
 }

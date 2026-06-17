@@ -3,6 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { ATTRIBUTION_KEY } from "@/components/locked/LockedIntro";
+import { writeContributorName } from "@/lib/contributor-name";
 import { Input } from "@/components/ui/input";
 import { DesignSwitchPreview } from "@/components/community/DesignSwitchPreview";
 
@@ -63,10 +64,7 @@ function readStoredName(): string {
 }
 
 function persistContributorName(name: string) {
-  const trimmed = name.trim();
-  if (trimmed) {
-    localStorage.setItem(ATTRIBUTION_KEY, trimmed);
-  }
+  writeContributorName(name);
 }
 
 type WelcomeStepVariant = "boundary" | "design" | "contributions" | "github" | "name";

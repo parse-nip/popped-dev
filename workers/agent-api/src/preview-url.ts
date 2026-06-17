@@ -20,9 +20,9 @@ export function branchToAlias(branch: string): string {
 
 /**
  * Construct a stable branch-alias preview URL for Cloudflare Pages.
- * Confirm the exact alias in Pages dashboard → View build → Aliases after first deploy.
+ * CF uses `{alias}.{project}.pages.dev` and truncates aliases to ~28 chars.
  */
 export function branchToPreviewUrl(branch: string, projectName = DEFAULT_PROJECT): string {
-  const alias = branchToAlias(branch);
-  return `https://${alias}--${projectName}.pages.dev`;
+  const alias = branchToAlias(branch).slice(0, 28).replace(/-$/, "");
+  return `https://${alias}.${projectName}.pages.dev`;
 }

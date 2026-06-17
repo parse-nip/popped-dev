@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { fetchPreviewUrl } from "@/lib/agent-client";
 
 export type PreviewMode = "live" | "preview";
 
@@ -25,6 +26,7 @@ type PreviewContextValue = {
     runId: string;
     agentId: string;
   }) => void;
+  updatePreviewUrl: (previewUrl: string) => void;
   backToLive: () => void;
   openReview: () => void;
   closeReview: () => void;
@@ -49,14 +51,26 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
       runId: string;
       agentId: string;
     }) => {
-      setPreviewUrl(params.previewUrl);
       setBranch(params.branch);
       setRunId(params.runId);
       setAgentId(params.agentId);
       setMode("preview");
+      setPreviewUrl(params.previewUrl);
+
+      void fetchPreviewUrl(params.branch)
+        .then((resolved) => {
+          setPreviewUrl(resolved.previewUrl);
+        })
+        .catch(() => {
+          // keep initial URL; PreviewFrame will retry
+        });
     },
     [],
   );
+
+  const updatePreviewUrl = useCallback((url: string) => {
+    setPreviewUrl(url);
+  }, []);
 
   const backToLive = useCallback(() => {
     setMode("live");
@@ -81,6 +95,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
       reviewOpen,
       prUrl,
       showPreview,
+      updatePreviewUrl,
       backToLive,
       openReview,
       closeReview,
@@ -95,6 +110,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
       reviewOpen,
       prUrl,
       showPreview,
+      updatePreviewUrl,
       backToLive,
       openReview,
       closeReview,

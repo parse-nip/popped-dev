@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { ContributorNameControl } from "@/components/community/ContributorNameControl";
 import { useDesignMode } from "@/components/design/DesignModeContext";
 
 function DesignCursorIcon() {
@@ -30,7 +31,9 @@ export function SiteHeader() {
         popped.dev
       </Link>
 
-      <button
+      <div className="site-header-actions">
+        <ContributorNameControl />
+        <button
         type="button"
         role="switch"
         aria-checked={isDesignMode}
@@ -50,6 +53,7 @@ export function SiteHeader() {
           <span className="site-header-design-switch-thumb" />
         </span>
       </button>
+      </div>
     </header>
   );
 }

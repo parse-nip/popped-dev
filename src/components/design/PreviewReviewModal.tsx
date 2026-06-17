@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -57,45 +58,37 @@ export function PreviewReviewModal() {
   return (
     <Dialog open={reviewOpen} onOpenChange={(open) => !open && closeReview()}>
       <DialogContent showCloseButton className="preview-review-modal">
-        <DialogHeader>
-          <DialogTitle>Review your design</DialogTitle>
+        <DialogHeader className="preview-review-modal-header">
+          <DialogTitle>Submit your design</DialogTitle>
           <DialogDescription>
-            Confirm the preview looks right before opening a pull request for review.
+            Check the draft below, then open a pull request so the site owner can review and merge.
           </DialogDescription>
         </DialogHeader>
 
         <div className="preview-review-modal-body">
           <div className="preview-review-modal-meta">
             {contributorName ? (
-              <p>
+              <div className="preview-review-modal-meta-item">
                 <span className="preview-review-modal-label">Contributor</span>
-                <br />
-                {contributorName}
-              </p>
-            ) : null}
-            {branch ? (
-              <p>
-                <span className="preview-review-modal-label">Branch</span>
-                <br />
-                <code>{branch}</code>
-              </p>
+                <span className="preview-review-modal-value">{contributorName}</span>
+              </div>
             ) : null}
             {previewUrl ? (
-              <p>
-                <span className="preview-review-modal-label">Preview</span>
-                <br />
-                <a href={previewUrl} target="_blank" rel="noreferrer">
-                  Open in new tab
+              <div className="preview-review-modal-meta-item">
+                <span className="preview-review-modal-label">Preview link</span>
+                <a
+                  className="preview-review-modal-link"
+                  href={previewUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open draft in new tab
                 </a>
-              </p>
+              </div>
             ) : null}
           </div>
 
-          {previewUrl ? (
-            <PreviewFrame />
-          ) : (
-            <p className="preview-review-modal-empty">No preview URL available yet.</p>
-          )}
+          <PreviewFrame compact />
 
           {isSubmitting ? (
             <p className="preview-review-modal-status">Opening pull request…</p>
@@ -103,32 +96,22 @@ export function PreviewReviewModal() {
           {error ? <p className="preview-review-modal-error">{error}</p> : null}
           {prUrl ? (
             <p className="preview-review-modal-success">
-              Pull request opened:{" "}
+              Pull request opened —{" "}
               <a href={prUrl} target="_blank" rel="noreferrer">
-                View on GitHub
+                view on GitHub
               </a>
-              . Thanks — the owner will review.
+              .
             </p>
           ) : null}
         </div>
 
-        <DialogFooter>
-          <button
-            type="button"
-            className="preview-bar-btn preview-bar-btn--ghost"
-            onClick={closeReview}
-            disabled={isSubmitting}
-          >
+        <DialogFooter className="preview-review-modal-footer">
+          <Button type="button" variant="outline" onClick={closeReview} disabled={isSubmitting}>
             Keep editing
-          </button>
-          <button
-            type="button"
-            className="preview-bar-btn preview-bar-btn--primary"
-            onClick={handleSubmit}
-            disabled={isSubmitting || Boolean(prUrl)}
-          >
-            {isSubmitting ? "Opening PR…" : "Open PR"}
-          </button>
+          </Button>
+          <Button type="button" onClick={handleSubmit} disabled={isSubmitting || Boolean(prUrl)}>
+            {isSubmitting ? "Opening PR…" : "Open pull request"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
