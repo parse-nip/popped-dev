@@ -19,3 +19,4 @@
 - **Style the facts, don't change them.** Typography, colors, cards, animations: yes. Rewording experience or education: no.
 - Facts must always remain visible on the page (no `display: none` on `#locked-resume`).
 - Add `data-contribution-id` to styled elements for hover attribution.
+- If you are contributing, read @Design.md first!

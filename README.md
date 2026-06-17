@@ -47,6 +47,37 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Static export via `output: "export"`. Build command: `npm run build`. Output directory: `out`.
 
+Production deploys when you push to `main` via **Cloudflare Pages Git integration** (build `npm run build`, output `out`). CI on PRs runs via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+**Testing the agent flow and resetting:** see [`docs/TESTING-AND-RESET.md`](docs/TESTING-AND-RESET.md).
+
+## Agent API (Cloudflare Worker)
+
+Design-mode chat calls a separate Worker at `workers/agent-api/` (not bundled in the static export).
+
+| Route | Purpose |
+|---|---|
+| `POST /api/agent/session` | Validate contributor + session |
+| `POST /api/agent/message` | Send element context + message |
+| `GET /api/agent/runs/:runId/stream` | SSE stream (assistant, status, previewUrl) |
+| `POST /api/agent/runs/:runId/submit` | Phase 3: open PR |
+
+See [`workers/agent-api/README.md`](workers/agent-api/README.md) for secrets and preview URL alias format.
+
+Local dev: run `npm run dev` in `workers/agent-api`, then set `NEXT_PUBLIC_AGENT_API_URL=http://localhost:8787` in `.env.local`.
+
+## Preview URLs
+
+Branch previews use Cloudflare Pages branch aliases:
+
+```
+https://{normalized-branch}--popped-dev.pages.dev
+```
+
+Example: branch `cursor/add-styles-a1b2` → `https://cursor-add-styles-a1b2--popped-dev.pages.dev`
+
+Confirm the exact alias in the Pages dashboard after the first agent push.
+
 ## Updating your resume
 
 Edit `src/locked/experience.json` (the fact data), then run `npm run lock:checksum` and commit both files.

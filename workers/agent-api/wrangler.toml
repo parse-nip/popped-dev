@@ -1,0 +1,19 @@
+name = "popped-dev-agent-api"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+account_id = "f176df02bc99b7cfffece89aa198d41e"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "99cbe29666424381b3b1837e2551d237"
+preview_id = "f93d5fe63942416a86c255c140616f7b"
+
+[vars]
+PAGES_PROJECT_NAME = "popped-dev"
+GITHUB_REPO_URL = "https://github.com/parse-nip/popped-dev"
+CORS_ORIGIN = "https://popped.dev"
+
+[[routes]]
+pattern = "popped.dev/api/*"
+zone_name = "popped.dev"

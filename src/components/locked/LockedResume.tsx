@@ -9,18 +9,8 @@ export function LockedResume() {
   const data = getExperience();
 
   return (
-    <section
-      id="locked-resume"
-      data-facts="true"
-      aria-label="Portfolio facts"
-      className="locked-resume-section border-b border-border"
-    >
-      <div className="locked-resume-inner mx-auto max-w-3xl px-4 py-6">
-        <p className="locked-resume-hint mb-4 text-xs text-muted-foreground">
-          Facts below are locked — style them freely, but do not change the content.
-        </p>
-
-        <article className="locked-resume">
+    <section id="locked-resume" data-facts="true" aria-label="Portfolio facts">
+      <article className="locked-resume">
           <header className="locked-resume-header">
             <h1 data-fact-id="profile-name">{data.profile.name}</h1>
             <p data-fact-id="profile-tagline">{data.profile.tagline}</p>
@@ -117,8 +107,7 @@ export function LockedResume() {
               ))}
             </ul>
           </section>
-        </article>
-      </div>
+      </article>
     </section>
   );
 }
