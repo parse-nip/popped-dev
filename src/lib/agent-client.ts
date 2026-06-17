@@ -4,11 +4,27 @@ import type { ElementContext } from "./element-context";
 const SESSION_ID_KEY = "popped.dev:agent-session-id";
 const AGENT_ID_KEY = "popped.dev:agent-id";
 
-const API_BASE =
-  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_AGENT_API_URL) || "";
+/** Pages hosts have no /api — call the Worker directly (works when popped.dev is blocked). */
+const PAGES_AGENT_API = "https://popped-dev-agent-api.parse-nip.workers.dev";
+
+function isPagesDevHost(hostname: string): boolean {
+  return hostname === "popped-dev.pages.dev" || hostname.endsWith("--popped-dev.pages.dev");
+}
+
+function getApiBase(): string {
+  const fromEnv =
+    typeof process !== "undefined" ? process.env.NEXT_PUBLIC_AGENT_API_URL?.trim() : "";
+  if (fromEnv) return fromEnv;
+
+  if (typeof window !== "undefined" && isPagesDevHost(window.location.hostname)) {
+    return PAGES_AGENT_API;
+  }
+
+  return "";
+}
 
 function apiUrl(path: string): string {
-  return `${API_BASE}${path}`;
+  return `${getApiBase()}${path}`;
 }
 
 export function getContributorName(): string {

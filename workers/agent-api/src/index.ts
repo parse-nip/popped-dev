@@ -36,6 +36,13 @@ app.use(
       ) {
         return origin;
       }
+      // Cloudflare Pages default + branch preview URLs (no Worker on *.pages.dev).
+      if (
+        origin === "https://popped-dev.pages.dev" ||
+        /^https:\/\/[^/]+--popped-dev\.pages\.dev$/.test(origin)
+      ) {
+        return origin;
+      }
       return c.env.CORS_ORIGIN || "https://popped.dev";
     },
     allowMethods: ["GET", "POST", "OPTIONS"],

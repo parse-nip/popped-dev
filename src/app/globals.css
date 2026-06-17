@@ -1065,10 +1065,10 @@
   .element-chat-popup-thread {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     max-height: 160px;
     overflow-y: auto;
-    padding: 2px 14px 0;
+    padding: 4px 14px 14px;
   }
 
   .element-chat-popup-line {
@@ -1084,10 +1084,12 @@
 
   .element-chat-popup-line--assistant {
     color: rgba(17, 17, 17, 0.55);
+    padding-bottom: 2px;
   }
 
   .element-chat-popup-line--status {
     color: rgba(17, 17, 17, 0.35);
+    padding-bottom: 2px;
   }
 
   .element-chat-popup-line--error {
