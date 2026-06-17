@@ -1009,6 +1009,28 @@
     color: inherit;
   }
 
+  .locked-resume-links {
+    color: var(--color-text-secondary);
+    font-size: 0.9375rem;
+  }
+
+  .locked-resume-links a {
+    color: var(--color-accent-blue-text);
+    text-decoration: underline;
+    text-decoration-color: rgba(49, 95, 220, 0.35);
+    text-underline-offset: 0.15em;
+    cursor: pointer;
+    transition:
+      color 120ms ease,
+      text-decoration-color 120ms ease;
+  }
+
+  .locked-resume-links a:hover,
+  .locked-resume-links a:focus-visible {
+    color: #2449b8;
+    text-decoration-color: currentColor;
+  }
+
   .design-select-overlay {
     pointer-events: none;
     position: fixed;

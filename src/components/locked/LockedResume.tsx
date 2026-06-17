@@ -14,11 +14,20 @@ export function LockedResume() {
           <header className="locked-resume-header">
             <h1 data-fact-id="profile-name">{data.profile.name}</h1>
             <p data-fact-id="profile-tagline">{data.profile.tagline}</p>
-            <p className="locked-resume-links">
+            <p
+              className="locked-resume-links"
+              data-contribution-id="profile-links"
+            >
               {data.profile.links.map((link, i) => (
                 <span key={link.href}>
                   {i > 0 ? " · " : null}
-                  <a href={link.href} data-fact-id={`profile-link-${i}`}>
+                  <a
+                    href={link.href}
+                    data-fact-id={`profile-link-${i}`}
+                    data-contribution-id="profile-links"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
                     {link.label}
                   </a>
                 </span>
