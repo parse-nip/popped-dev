@@ -1,7 +1,7 @@
 import type { Env } from "./types";
 import { isLockedFactPath } from "../../../shared/locked-fact-files";
 import { requireApprovedDesignRequest } from "./approve-design-request";
-import { openRouterChat, resolveOpenRouterModel } from "./openrouter";
+import { openRouterChat, resolveOpenRouterModel, type OpenRouterChatResult } from "./openrouter";
 
 export type AgentEditInput = {
   prompt: string;
@@ -46,30 +46,13 @@ function extractJsonObject(text: string): unknown | null {
   }
 }
 
-function buildEditPrompt(input: AgentEditInput): string {
-  const fileList = Object.keys(input.files)
-    .slice(0, 24)
-    .map((path) => `- ${path}`)
-    .join("\n");
-
-  const fileContents = Object.entries(input.files)
-    .slice(0, 8)
-    .map(([path, content]) => `### ${path}\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\``)
-    .join("\n\n");
-
-  const element = input.selectedElement
-    ? JSON.stringify(input.selectedElement, null, 2)
-    : "null";
-
-  return `You are a code editing assistant for popped.dev — a Next.js community portfolio.
-
-Return ONLY valid JSON (no markdown fences):
+const EDIT_SYSTEM_PROMPT = `You are a code editing assistant for popped.dev — a Next.js community portfolio.
+Return ONLY one valid JSON object (no markdown fences, no commentary).
+The JSON must match this shape:
 {
   "summary": "<one sentence>",
-  "writes": [
-    { "path": "src/components/SiteHeader.tsx", "content": "<full file content>" }
-  ],
-  "commands": ["npm install some-package"]
+  "writes": [{ "path": "src/app/design-overrides.css", "content": "<full file content>" }],
+  "commands": []
 }
 
 Rules:
@@ -80,9 +63,24 @@ Rules:
 - Prefer src/app/design-overrides.css, src/components/community/*, src/app/globals.css, src/components/SiteHeader.tsx.
 - To add icons, logos, or images: use inline SVG or emoji in TSX (especially SiteHeader.tsx), or add SVG/PNG under public/assets/ and reference with img. Do not use npm icon libraries unless the user explicitly asks.
 - commands: only npm install lines if new packages are needed; otherwise [].
-- Keep changes minimal and focused on the user request.
+- Keep changes minimal and focused on the user request.`;
 
-Selected element:
+function buildEditPrompt(input: AgentEditInput): string {
+  const fileList = Object.keys(input.files)
+    .slice(0, 20)
+    .map((path) => `- ${path}`)
+    .join("\n");
+
+  const fileContents = Object.entries(input.files)
+    .slice(0, 4)
+    .map(([path, content]) => `### ${path}\n\`\`\`\n${content.slice(0, 1200)}\n\`\`\``)
+    .join("\n\n");
+
+  const element = input.selectedElement
+    ? JSON.stringify(input.selectedElement, null, 2)
+    : "null";
+
+  return `Selected element:
 ${element}
 
 Available files:
@@ -186,12 +184,27 @@ function sanitizeAgentEditResult(
   };
 }
 
-async function callDesignLlm(env: Env, prompt: string): Promise<string | null> {
-  return openRouterChat(env, [{ role: "user", content: prompt }], {
-    maxTokens: 8192,
-    temperature: 0.2,
-    jsonMode: true,
-  });
+function openRouterErrorMessage(result: OpenRouterChatResult): string {
+  if (!result.error) return "OpenRouter did not return an edit.";
+  if (result.status === 402 || /credits|afford|402/.test(result.error)) {
+    return "OpenRouter is out of credits on this API key — add credits at openrouter.ai/settings/keys or raise the key's daily limit.";
+  }
+  return `OpenRouter did not return an edit. ${result.error}`;
+}
+
+async function callDesignLlm(env: Env, prompt: string): Promise<OpenRouterChatResult> {
+  return openRouterChat(
+    env,
+    [
+      { role: "system", content: EDIT_SYSTEM_PROMPT },
+      { role: "user", content: prompt },
+    ],
+    {
+      // Keep output budget low — OpenRouter keys with small daily limits fail at 8192 max_tokens (HTTP 402).
+      maxTokens: 1200,
+      temperature: 0.2,
+    },
+  );
 }
 
 export async function runAgentEdit(
@@ -216,14 +229,14 @@ export async function runAgentEdit(
   }
 
   const prompt = buildEditPrompt(input);
-  const aiText = await callDesignLlm(env, prompt);
+  const aiResult = await callDesignLlm(env, prompt);
 
   if (hasOpenRouter) {
-    if (!aiText) {
-      throw new Error("OpenRouter did not return an edit — try again in a moment.");
+    if (!aiResult.text) {
+      throw new Error(openRouterErrorMessage(aiResult));
     }
 
-    const parsed = parseAgentEditResult(extractJsonObject(aiText));
+    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
     if (!parsed) {
       throw new Error("The AI returned an invalid edit — try rephrasing your request.");
     }
@@ -232,8 +245,8 @@ export async function runAgentEdit(
     return sanitizeAgentEditResult(parsed, input, true);
   }
 
-  if (aiText) {
-    const parsed = parseAgentEditResult(extractJsonObject(aiText));
+  if (aiResult.text) {
+    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
     if (parsed) {
       emit?.("status", { message: "Edit ready — applying…" });
       return sanitizeAgentEditResult(parsed, input);

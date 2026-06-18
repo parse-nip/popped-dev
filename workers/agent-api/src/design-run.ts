@@ -312,10 +312,11 @@ function fallbackPatch(input: RunDesignInput): DesignPatch {
 }
 
 async function callDesignLlm(env: Env, prompt: string): Promise<string | null> {
-  return openRouterChat(env, [{ role: "user", content: prompt }], {
+  const result = await openRouterChat(env, [{ role: "user", content: prompt }], {
     maxTokens: 2048,
     temperature: 0.3,
   });
+  return result.text;
 }
 
 export async function generateDesignPatch(env: Env, input: RunDesignInput): Promise<DesignPatch> {

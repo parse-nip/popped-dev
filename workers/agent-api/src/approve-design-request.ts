@@ -133,15 +133,15 @@ export async function approveDesignRequest(
     return heuristic;
   }
 
-  const aiText = await openRouterChat(
+  const aiResult = await openRouterChat(
     env,
     [{ role: "user", content: buildApprovalPrompt(input) }],
-    { maxTokens: 256, temperature: 0.1, jsonMode: true },
+    { maxTokens: 256, temperature: 0.1 },
   );
 
-  if (!aiText) return heuristic;
+  if (!aiResult.text) return heuristic;
 
-  const parsed = parseApproval(extractJsonObject(aiText));
+  const parsed = parseApproval(extractJsonObject(aiResult.text));
   if (!parsed) return heuristic;
 
   if (!parsed.approved) return parsed;
