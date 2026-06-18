@@ -3,13 +3,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ElementChatPopup } from "@/components/design/ElementChatPopup";
-import { DraftConfirmBadge } from "@/components/design/DraftConfirmBadge";
 import { useDesignWorkspace } from "@/components/design/DesignWorkspaceProvider";
 import {
   isDesignEmbedMessage,
   type DesignEmbedElementContext,
   type DesignEmbedRect,
 } from "@shared/design-embed-messages";
+import {
+  DESIGN_HOST_SOURCE,
+  type DesignHostMessage,
+} from "@shared/design-host-messages";
 import { buildElementContext, ensureDesignIdOnElement } from "@/lib/element-context";
 import type { ElementContext } from "@/lib/element-context";
 import { getElementLabel, getSelectableElement } from "@/lib/element-label";
@@ -60,32 +63,62 @@ function embedContextToElementContext(context: DesignEmbedElementContext): Eleme
   return context;
 }
 
+function getPreviewIframe(): HTMLIFrameElement | null {
+  return document.querySelector<HTMLIFrameElement>(".design-workspace-iframe-host");
+}
+
+function postToPreviewIframe(message: DesignHostMessage) {
+  const iframe = getPreviewIframe();
+  iframe?.contentWindow?.postMessage(message, "*");
+}
+
 export function DesignSelectLayerActive() {
-  const { showLivePreview, embedPreviewUrl } = useDesignWorkspace();
+  const { showLivePreview, embedPreviewUrl, runAgentEdit } = useDesignWorkspace();
   const useIframeSelection = showLivePreview && Boolean(embedPreviewUrl);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const [hover, setHover] = useState<HoverState | null>(null);
   const [chat, setChat] = useState<ChatState | null>(null);
   const [highlight, setHighlight] = useState<Rect | null>(null);
-  const [selectionLocked, setSelectionLocked] = useState(false);
 
   useEffect(() => {
     document.body.dataset.cursorMode = "design";
     return () => {
       delete document.body.dataset.cursorMode;
+      postToPreviewIframe({ source: DESIGN_HOST_SOURCE, type: "clear-editing" });
     };
   }, []);
 
   useEffect(() => {
-    iframeRef.current = document.querySelector<HTMLIFrameElement>(".design-workspace-iframe-host");
+    iframeRef.current = getPreviewIframe();
   });
 
   const clearSelection = useCallback(() => {
     setChat(null);
     setHover(null);
     setHighlight(null);
+    postToPreviewIframe({ source: DESIGN_HOST_SOURCE, type: "clear-editing" });
   }, []);
+
+  const handleSubmitEdit = useCallback(
+    async (prompt: string, context: ElementContext) => {
+      setChat(null);
+      setHover(null);
+      setHighlight(null);
+      postToPreviewIframe({
+        source: DESIGN_HOST_SOURCE,
+        type: "mark-editing",
+        designId: context.designId,
+      });
+
+      try {
+        await runAgentEdit(prompt, context);
+      } finally {
+        postToPreviewIframe({ source: DESIGN_HOST_SOURCE, type: "clear-editing" });
+      }
+    },
+    [runAgentEdit],
+  );
 
   const updateHover = useCallback((target: EventTarget | null) => {
     const element = getSelectableElement(target);
@@ -104,38 +137,21 @@ export function DesignSelectLayerActive() {
   useEffect(() => {
     if (useIframeSelection) return;
 
-    const tracked = chat?.context.designId ?? hover?.context.designId;
-    if (!tracked) return;
-
-    // Static page highlight sync handled via DOM element lookup below
-  }, [useIframeSelection, chat, hover]);
-
-  useEffect(() => {
-    if (useIframeSelection) return;
-
     function handleMouseMove(event: MouseEvent) {
-      if (chat || selectionLocked) return;
+      if (chat) return;
       updateHover(event.target);
       const element = getSelectableElement(event.target);
       setHighlight(element ? rectFromElement(element, HIGHLIGHT_INSET) : null);
     }
 
     function handleMouseLeave() {
-      if (!chat && !selectionLocked) {
+      if (!chat) {
         setHover(null);
         setHighlight(null);
       }
     }
 
     function handleClick(event: MouseEvent) {
-      if (selectionLocked) {
-        const target = event.target;
-        if (target instanceof Element && target.closest("[data-design-select-ui]")) return;
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-
       const element = getSelectableElement(event.target);
       if (!element) return;
 
@@ -158,7 +174,7 @@ export function DesignSelectLayerActive() {
       document.removeEventListener("mouseleave", handleMouseLeave);
       document.removeEventListener("click", handleClick, true);
     };
-  }, [chat, selectionLocked, updateHover, useIframeSelection]);
+  }, [chat, updateHover, useIframeSelection]);
 
   useEffect(() => {
     if (!useIframeSelection) return;
@@ -166,11 +182,11 @@ export function DesignSelectLayerActive() {
     function handleMessage(event: MessageEvent) {
       if (!isDesignEmbedMessage(event.data)) return;
 
-      const iframe = iframeRef.current;
+      const iframe = iframeRef.current ?? getPreviewIframe();
       if (!iframe) return;
 
       if (event.data.type === "clear") {
-        if (!chat && !selectionLocked) {
+        if (!chat) {
           setHover(null);
           setHighlight(null);
         }
@@ -179,17 +195,16 @@ export function DesignSelectLayerActive() {
 
       if (event.data.type === "ready") return;
 
+      if (chat) return;
+
       const context = embedContextToElementContext(event.data.context);
       const rect = offsetEmbedRect(iframe, event.data.rect);
 
       if (event.data.type === "hover") {
-        if (chat || selectionLocked) return;
         setHover({ label: context.label, context });
         setHighlight(rect);
         return;
       }
-
-      if (selectionLocked) return;
 
       setChat({ label: context.label, context });
       setHover({ label: context.label, context });
@@ -198,41 +213,39 @@ export function DesignSelectLayerActive() {
 
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, [useIframeSelection, chat, selectionLocked]);
+  }, [useIframeSelection, chat]);
 
-  const displayHighlight = highlight;
+  const showHighlight = Boolean(highlight && (hover || chat));
+  const highlightSelected = Boolean(chat);
 
   return createPortal(
     <>
-      {displayHighlight ? (
+      {showHighlight && highlight ? (
         <div data-design-select-ui className="design-select-overlay" aria-hidden="true">
           <div
-            className={`design-select-highlight${chat ? " design-select-highlight--selected" : ""}`}
+            className={
+              highlightSelected
+                ? "design-select-highlight design-select-highlight--selected"
+                : "design-select-highlight"
+            }
             style={{
-              top: displayHighlight.top,
-              left: displayHighlight.left,
-              width: displayHighlight.width,
-              height: displayHighlight.height,
+              top: highlight.top,
+              left: highlight.left,
+              width: highlight.width,
+              height: highlight.height,
             }}
           />
         </div>
       ) : null}
 
-      {chat && displayHighlight ? (
-        <>
-          <ElementChatPopup
-            anchorRect={displayHighlight}
-            elementLabel={chat.label}
-            elementContext={chat.context}
-            onClose={clearSelection}
-            onSelectionLockChange={setSelectionLocked}
-          />
-          <DraftConfirmBadge
-            anchorRect={displayHighlight}
-            onRejected={clearSelection}
-            onAccepted={clearSelection}
-          />
-        </>
+      {chat && highlight ? (
+        <ElementChatPopup
+          anchorRect={highlight}
+          elementLabel={chat.label}
+          elementContext={chat.context}
+          onClose={clearSelection}
+          onSubmitEdit={handleSubmitEdit}
+        />
       ) : null}
     </>,
     document.body,

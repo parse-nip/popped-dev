@@ -22,8 +22,10 @@ function HomeContent() {
     <>
       <DesignEmbedListener />
       <DesignModePreviewGuard />
-      <SiteHeader />
-      <DesignStatusMessage />
+      <div className="design-chrome">
+        <SiteHeader />
+        <DesignStatusMessage />
+      </div>
       <div className="design-stage">
         <main
           className={`design-static-layer${showLivePreview ? " design-static-layer--hidden" : ""}`}

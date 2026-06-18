@@ -15,9 +15,8 @@ GITHUB_REPO_URL = "https://github.com/parse-nip/popped-dev"
 CORS_ORIGIN = "https://popped.dev"
 # Inactive design sessions + branches cleaned after this many ms (default: 1 hour).
 CLEANUP_TTL_MS = "3600000"
-
-[ai]
-binding = "AI"
+# Optional override — default is google/gemini-2.5-flash via shared/openrouter-config.ts
+# OPENROUTER_MODEL = "anthropic/claude-3.5-sonnet"
 
 [triggers]
 crons = ["0 * * * *"]

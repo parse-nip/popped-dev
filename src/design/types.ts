@@ -11,7 +11,10 @@ export type DesignWorkspaceStatus =
   | "build_error"
   | "ready_to_publish"
   | "publishing"
-  | "published";
+  | "published"
+  | "edit_rejected";
+
+export type StatusBarTone = "default" | "approving" | "approved" | "rejected";
 
 export type EditEvent = {
   id: string;

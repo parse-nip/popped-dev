@@ -12,9 +12,10 @@ export function DesignWorkspacePreview() {
 
   return (
     <iframe
+      key={embedPreviewUrl}
       title="Portfolio preview"
       src={embedPreviewUrl}
-      className={`design-live-layer${showLivePreview ? " design-live-layer--visible" : ""}`}
+      className={`design-live-layer design-workspace-iframe-host${showLivePreview ? " design-live-layer--visible" : ""}`}
       onLoad={onPreviewFrameLoad}
     />
   );

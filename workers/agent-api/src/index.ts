@@ -1402,6 +1402,7 @@ app.post("/api/agent/edit", async (c) => {
     prompt?: string;
     selectedElement?: unknown;
     files?: Record<string, string>;
+    stream?: boolean;
   };
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
@@ -1419,12 +1420,42 @@ app.post("/api/agent/edit", async (c) => {
       ? (body.selectedElement as AgentEditInput["selectedElement"])
       : null;
 
-  try {
-    const result = await runAgentEdit(c.env, {
-      prompt,
-      selectedElement,
-      files,
+  const input: AgentEditInput = {
+    prompt,
+    selectedElement,
+    files,
+  };
+
+  const wantsStream =
+    body.stream === true || c.req.header("Accept")?.includes("text/event-stream") === true;
+
+  if (wantsStream) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const emit = (event: string, data: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`event: ${event}\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+
+        try {
+          const result = await runAgentEdit(c.env, input, emit);
+          emit("result", result);
+          emit("done", { ok: true });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "agent_edit_failed";
+          emit("error", { message });
+        } finally {
+          controller.close();
+        }
+      },
     });
+
+    return sseResponse(stream);
+  }
+
+  try {
+    const result = await runAgentEdit(c.env, input);
     return c.json({ ok: true, ...result });
   } catch (error) {
     const message = error instanceof Error ? error.message : "agent_edit_failed";

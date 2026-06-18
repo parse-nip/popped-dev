@@ -25,6 +25,8 @@ type ElementChatPopupProps = {
   elementLabel: string;
   elementContext: ElementContext;
   onClose: () => void;
+  /** Workspace mode — close popup immediately and run edit in the background. */
+  onSubmitEdit?: (prompt: string, context: ElementContext) => void | Promise<void>;
   onSelectionLockChange?: (locked: boolean) => void;
 };
 
@@ -158,6 +160,7 @@ export function ElementChatPopup({
   elementLabel,
   elementContext,
   onClose,
+  onSubmitEdit,
   onSelectionLockChange,
 }: ElementChatPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
@@ -183,6 +186,7 @@ export function ElementChatPopup({
   const [contributorName, setContributorName] = useState(readContributorName);
   const setAgentBusy = useSetAgentBusy();
   const { showLivePreview, runAgentEdit } = useDesignWorkspace();
+  const workspaceMode = showLivePreview;
   const showConfirm = false;
   const hasThread =
     phase === "running" ||
@@ -254,8 +258,7 @@ export function ElementChatPopup({
     setIsThinking(false);
     setAgentBusy(false);
     setPhase("complete");
-    pushActivityStep({ id: "done", label: "Preview updated", state: "done" });
-  }, [pushActivityStep, setAgentBusy]);
+  }, [setAgentBusy]);
 
   const stopDictation = useCallback(() => {
     shouldListenRef.current = false;
@@ -379,6 +382,17 @@ export function ElementChatPopup({
     const trimmed = input.trim();
     if (!trimmed || isThinking) return;
 
+    if (onSubmitEdit) {
+      if (!showLivePreview) {
+        setActivityError("Still preparing — the page will update in a moment.");
+        return;
+      }
+      stopDictation();
+      onClose();
+      void onSubmitEdit(trimmed, elementContext);
+      return;
+    }
+
     if (!showLivePreview) {
       setActivityError("Still preparing — the page will update in a moment.");
       return;
@@ -400,15 +414,10 @@ export function ElementChatPopup({
     setPhase("running");
     setIsThinking(true);
     setAgentBusy(true);
-    pushActivityStep({ id: "send", label: "Sending prompt", state: "running" });
 
     try {
-      pushActivityStep({ id: "think", label: "Agent editing files", state: "running" });
       const summary = await runAgentEdit(trimmed, elementContext);
       updateAssistantMessage(summary);
-      pushActivityStep({ id: "send", label: "Sent", state: "done" });
-      pushActivityStep({ id: "think", label: "Preview updated", state: "done" });
-      pushActivityStep({ id: "apply", label: "Applied in WebContainer", state: "done" });
       finishRun();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Design request failed.";
@@ -563,13 +572,30 @@ export function ElementChatPopup({
             </svg>
           </button>
         ) : phase === "complete" ? (
-          <span className="element-chat-popup-locked-hint">Confirm below</span>
+          <button
+            type="button"
+            className="element-chat-popup-icon-btn element-chat-popup-icon-btn--muted"
+            aria-label="Close"
+            onClick={() => {
+              stopDictation();
+              onClose();
+            }}
+          >
+            <svg width="11" height="11" viewBox="0 0 11 11" fill="none" aria-hidden="true">
+              <path
+                d="M2.75 2.75L8.25 8.25M8.25 2.75L2.75 8.25"
+                stroke="currentColor"
+                strokeWidth="1.25"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
         ) : (
           <span className="element-chat-popup-toolbar-spacer" aria-hidden="true" />
         )}
       </div>
 
-      {hasThread ? (
+      {hasThread && !workspaceMode ? (
         <div className="element-chat-popup-thread">
           {activityMessages.map((message) => (
             <p
@@ -585,6 +611,16 @@ export function ElementChatPopup({
             </p>
           ) : null}
           <AgentActivityFeed steps={activitySteps} error={activityError} />
+        </div>
+      ) : phase === "complete" && assistantSummary ? (
+        <div className="element-chat-popup-thread element-chat-popup-thread--compact">
+          <p className="element-chat-popup-line element-chat-popup-line--assistant">
+            {assistantSummary}
+          </p>
+        </div>
+      ) : activityError ? (
+        <div className="element-chat-popup-thread element-chat-popup-thread--compact">
+          <p className="element-chat-popup-line element-chat-popup-line--status">{activityError}</p>
         </div>
       ) : null}
         </>

@@ -2465,9 +2465,41 @@
   z-index: 3;
 }
 
+body[data-design-embed="1"] .design-embed-editing-target {
+  outline: 2px solid rgba(49, 95, 220, 0.72);
+  outline-offset: 3px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 4px rgba(49, 95, 220, 0.14);
+  animation: design-embed-editing-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes design-embed-editing-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px rgba(49, 95, 220, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 7px rgba(49, 95, 220, 0.2);
+  }
+}
+
 .site-header-design-switch--loading .site-header-design-switch-track {
   opacity: 0.7;
   animation: design-switch-pulse 1.4s ease-in-out infinite;
+}
+
+.design-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 120;
+  background: #ffffff;
+  box-shadow: 0 1px 0 rgba(17, 17, 17, 0.06);
+}
+
+.design-chrome .site-header {
+  position: relative;
+  z-index: 1;
+  border-bottom: none;
 }
 
 .design-status-bar {
@@ -2478,10 +2510,11 @@
   min-height: 32px;
   padding: 6px 16px;
   border-bottom: 1px solid var(--color-border);
-  background: rgba(250, 250, 250, 0.92);
+  background: rgba(250, 250, 250, 0.96);
   color: var(--color-text-secondary);
   font-size: 13px;
   line-height: 1.4;
+  backdrop-filter: blur(10px);
 }
 
 .design-status-bar--error {
@@ -2490,12 +2523,68 @@
   border-bottom-color: rgba(164, 95, 18, 0.15);
 }
 
+.design-status-bar--approving {
+  background: rgba(250, 250, 250, 0.96);
+  color: var(--color-text-secondary);
+}
+
+.design-status-bar--approved {
+  animation: design-status-approved-flash 1.4s ease-out;
+  background: #ecfdf5;
+  color: #166534;
+  border-bottom-color: rgba(22, 101, 52, 0.18);
+}
+
+.design-status-bar--rejected {
+  background: #fff7ed;
+  color: #c2410c;
+  border-bottom-color: rgba(194, 65, 12, 0.15);
+}
+
+.design-status-bar-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #22c55e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+@keyframes design-status-approved-flash {
+  0% {
+    background: rgba(250, 250, 250, 0.96);
+    color: var(--color-text-secondary);
+  }
+  18%,
+  42% {
+    background: #bbf7d0;
+    color: #166534;
+  }
+  100% {
+    background: #ecfdf5;
+    color: #166534;
+  }
+}
+
 .design-status-bar-dot {
   width: 6px;
   height: 6px;
   border-radius: 999px;
   background: #315fdc;
   animation: design-switch-pulse 1.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.design-status-bar-text {
+  max-width: min(920px, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes design-switch-pulse {
