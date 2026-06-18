@@ -20,6 +20,10 @@ export type OpenRouterChatResult = {
   status?: number;
 };
 
+export type OpenRouterStreamHandlers = {
+  onDelta?: (delta: string) => void;
+};
+
 export function resolveOpenRouterModel(env: Env): string {
   return env.OPENROUTER_MODEL?.trim() || DEFAULT_OPENROUTER_MODEL;
 }
@@ -90,6 +94,140 @@ function extractMessageContent(payload: unknown): string | null {
   }
 
   return null;
+}
+
+function extractStreamDelta(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+
+  const data = payload as {
+    choices?: Array<{
+      delta?: {
+        content?: string | ContentPart[] | null;
+        reasoning?: string | null;
+      };
+      text?: string;
+    }>;
+  };
+
+  const delta = data.choices?.[0]?.delta;
+  if (!delta) {
+    const legacy = data.choices?.[0]?.text;
+    return typeof legacy === "string" ? legacy : "";
+  }
+
+  if (typeof delta.content === "string") {
+    return delta.content;
+  }
+
+  if (Array.isArray(delta.content)) {
+    return delta.content.map(contentPartText).join("");
+  }
+
+  if (typeof delta.reasoning === "string") {
+    return delta.reasoning;
+  }
+
+  return "";
+}
+
+function parseSseDataLines(chunk: string): string[] {
+  const events: string[] = [];
+  const lines = chunk.split("\n");
+
+  for (const line of lines) {
+    if (!line.startsWith("data:")) continue;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]") continue;
+    events.push(data);
+  }
+
+  return events;
+}
+
+/** OpenRouter chat completion with optional token streaming. */
+export async function openRouterChatStream(
+  env: Env,
+  messages: ChatMessage[],
+  options: OpenRouterChatOptions & OpenRouterStreamHandlers = {},
+): Promise<OpenRouterChatResult> {
+  if (!env.OPENROUTER_API_KEY?.trim()) {
+    return { text: null, error: "OPENROUTER_API_KEY is not configured." };
+  }
+
+  const model = options.model ?? resolveOpenRouterModel(env);
+
+  try {
+    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: openRouterHeaders(env),
+      body: JSON.stringify({
+        model,
+        messages,
+        max_tokens: options.maxTokens ?? 4096,
+        temperature: options.temperature ?? 0.2,
+        stream: true,
+        reasoning: { effort: "none" },
+        plugins: [{ id: "response-healing" }],
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = (await response.text()).slice(0, 500);
+      console.warn("OpenRouter stream failed:", response.status, detail);
+      return {
+        text: null,
+        error: `OpenRouter HTTP ${response.status}: ${detail || "request failed"}`,
+        status: response.status,
+      };
+    }
+
+    if (!response.body) {
+      return { text: null, error: "OpenRouter returned an empty stream.", status: response.status };
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let fullText = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        for (const dataLine of parseSseDataLines(part)) {
+          try {
+            const payload = JSON.parse(dataLine) as unknown;
+            const delta = extractStreamDelta(payload);
+            if (!delta) continue;
+            fullText += delta;
+            options.onDelta?.(delta);
+          } catch {
+            // Ignore malformed SSE chunks.
+          }
+        }
+      }
+    }
+
+    const text = fullText.trim();
+    if (!text) {
+      return {
+        text: null,
+        error: "OpenRouter returned an empty response.",
+        status: response.status,
+      };
+    }
+
+    return { text, error: null, status: response.status };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn("OpenRouter stream failed:", message);
+    return { text: null, error: message };
+  }
 }
 
 /** OpenRouter chat completion (OpenAI-compatible). */

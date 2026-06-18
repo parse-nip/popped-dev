@@ -46,6 +46,12 @@ export type AgentEditStreamHandlers = {
   onStatus?: (message: string) => void;
   onApproved?: (reason: string) => void;
   onRejected?: (reason: string) => void;
+  onActivity?: (activity: {
+    kind: "thinking" | "tool" | "status";
+    text: string;
+    streamId?: string;
+    done?: boolean;
+  }) => void;
 };
 
 function normalizeAgentEditResult(payload: Record<string, unknown>): AgentEditResponse {
@@ -113,52 +119,86 @@ export async function requestAgentEdit(
     const decoder = new TextDecoder();
     let buffer = "";
     let result: AgentEditResponse | null = null;
+    let sawStreamEvent = false;
+    let streamError: string | null = null;
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      const blocks = buffer.split("\n\n");
-      buffer = blocks.pop() ?? "";
+        const blocks = buffer.split("\n\n");
+        buffer = blocks.pop() ?? "";
 
-      for (const block of blocks) {
-        const parsed = parseSseBlock(block.trim());
-        if (!parsed) continue;
+        for (const block of blocks) {
+          const parsed = parseSseBlock(block.trim());
+          if (!parsed) continue;
 
-        try {
-          const payload = JSON.parse(parsed.data) as Record<string, unknown>;
+          try {
+            const payload = JSON.parse(parsed.data) as Record<string, unknown>;
+            sawStreamEvent = true;
 
-          if (parsed.event === "status" && typeof payload.message === "string") {
-            handlers.onStatus?.(payload.message);
+            if (parsed.event === "status" && typeof payload.message === "string") {
+              handlers.onStatus?.(payload.message);
+            }
+
+            if (parsed.event === "activity") {
+              const kind = payload.kind;
+              const text = payload.text;
+              if (
+                (kind === "thinking" || kind === "tool" || kind === "status") &&
+                typeof text === "string"
+              ) {
+                handlers.onActivity?.({
+                  kind,
+                  text,
+                  streamId: typeof payload.streamId === "string" ? payload.streamId : undefined,
+                  done: payload.done === true,
+                });
+              }
+            }
+
+            if (parsed.event === "approved") {
+              const reason =
+                typeof payload.reason === "string"
+                  ? payload.reason
+                  : "Idea approved — agent is working…";
+              handlers.onApproved?.(reason);
+            }
+
+            if (parsed.event === "rejected") {
+              const reason =
+                typeof payload.reason === "string"
+                  ? payload.reason
+                  : "This request can't run in design mode.";
+              handlers.onRejected?.(reason);
+              throw new Error(reason);
+            }
+
+            if (parsed.event === "result") {
+              result = normalizeAgentEditResult(payload);
+            }
+
+            if (parsed.event === "error") {
+              streamError =
+                typeof payload.message === "string" ? payload.message : "Agent edit failed.";
+              throw new Error(streamError);
+            }
+          } catch (error) {
+            if (parsed.event === "error" || parsed.event === "rejected") throw error;
           }
-
-          if (parsed.event === "approved") {
-            const reason =
-              typeof payload.reason === "string" ? payload.reason : "Idea approved — agent is working…";
-            handlers.onApproved?.(reason);
-          }
-
-          if (parsed.event === "rejected") {
-            const reason =
-              typeof payload.reason === "string" ? payload.reason : "This request can't run in design mode.";
-            handlers.onRejected?.(reason);
-            throw new Error(reason);
-          }
-
-          if (parsed.event === "result") {
-            result = normalizeAgentEditResult(payload);
-          }
-
-          if (parsed.event === "error") {
-            throw new Error(
-              typeof payload.message === "string" ? payload.message : "Agent edit failed.",
-            );
-          }
-        } catch (error) {
-          if (parsed.event === "error") throw error;
         }
       }
+    } catch (error) {
+      if (error instanceof Error && streamError) throw error;
+      const message = error instanceof Error ? error.message : "Agent edit failed.";
+      if (/network|connection|abort|fetch/i.test(message)) {
+        throw new Error(
+          "Network connection lost — the edit may not have finished. Try again in a moment.",
+        );
+      }
+      throw error;
     }
 
     if (result) {
@@ -166,6 +206,12 @@ export async function requestAgentEdit(
         throw new Error("Agent returned no file changes.");
       }
       return result;
+    }
+
+    if (sawStreamEvent) {
+      throw new Error(
+        "Connection lost before the edit finished — try again. The agent may have been interrupted.",
+      );
     }
     throw new Error("Agent edit returned no result.");
   }

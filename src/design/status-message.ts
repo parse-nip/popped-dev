@@ -1,5 +1,6 @@
 import type { DesignWorkspaceStatus, StatusBarTone } from "./types";
 import { formatStatusWithPercent, isReadableStatusDetail } from "./install-progress";
+import { isReadableThoughtSnippet } from "@shared/agent-thought-display";
 
 export const STATUS_LABELS: Record<DesignWorkspaceStatus, string> = {
   idle: "",
@@ -86,7 +87,7 @@ export function resolveDesignStatusMessage(input: StatusMessageInput): string | 
         ? input.statusDetail
         : "Idea approved";
     }
-    if (isReadableStatusDetail(input.statusDetail)) {
+    if (isReadableStatusDetail(input.statusDetail) || isReadableThoughtSnippet(input.statusDetail ?? "")) {
       return input.statusDetail;
     }
     return label;

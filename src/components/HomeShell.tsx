@@ -5,6 +5,7 @@ import { DesignChangesProvider } from "@/components/design/DesignChangesProvider
 import { DesignWorkspaceProvider } from "@/components/design/DesignWorkspaceProvider";
 import { DesignWorkspacePreview } from "@/components/design/DesignWorkspaceShell";
 import { DesignStatusMessage } from "@/components/design/DesignStatusMessage";
+import { AgentThoughtStream } from "@/components/design/AgentThoughtStream";
 import { DesignModePreviewGuard } from "@/components/design/DesignModePreviewGuard";
 import { DesignSelectLayer } from "@/components/design/DesignSelectLayer";
 import { YourChangesTab } from "@/components/design/YourChangesTab";
@@ -26,6 +27,7 @@ function HomeContent() {
       <div className="design-chrome">
         <SiteHeader />
         <DesignStatusMessage />
+        <AgentThoughtStream />
       </div>
       <div className="design-stage">
         <CommunityChrome />
