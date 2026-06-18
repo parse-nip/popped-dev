@@ -260,6 +260,8 @@ export function pickContextFiles(
     "src/app/design-overrides.css",
     "src/components/SiteHeader.tsx",
     "src/components/locked/LockedResume.tsx",
+    "src/locked/experience.json",
+    "src/components/community/ResumeQuickLinks.tsx",
     ...extraPaths,
   ]);
 

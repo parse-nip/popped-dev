@@ -79,11 +79,11 @@ function heuristicApproval(input: AgentEditInput): ApprovalResult {
   if (offTopic) {
     return {
       approved: false,
-      reason: "Design mode is for visual tweaks to this site — pick an element and describe a style change.",
+      reason: "Design mode is for changes to this portfolio — pick an element and describe what you'd like.",
     };
   }
 
-  return { approved: true, reason: "Looks like a reasonable design tweak." };
+  return { approved: true, reason: "Looks like a reasonable portfolio change." };
 }
 
 function buildApprovalPrompt(input: AgentEditInput): string {
@@ -91,25 +91,29 @@ function buildApprovalPrompt(input: AgentEditInput): string {
     ? JSON.stringify(input.selectedElement, null, 2)
     : "null";
 
-  return `You gate design-mode requests for popped.dev — a community portfolio site visitors restyle in a live preview.
+  return `You gate design-mode requests for popped.dev — a community portfolio site visitors reshape in a live preview.
 
 Return ONLY valid JSON:
 { "approved": true, "reason": "<short friendly sentence>" }
 or
 { "approved": false, "reason": "<short friendly sentence explaining why not>" }
 
-APPROVE requests that restyle the site: colors, fonts, spacing, layout, borders, backgrounds, dark mode, animations, header tweaks, CSS on selected elements.
+APPROVE visual changes: colors, fonts, spacing, layout, borders, backgrounds, dark mode, animations, CSS on selected elements.
 
-ALSO APPROVE adding decorative visuals: icons, emojis, logos, SVG graphics, favicons, avatars, and images — these can be done with inline SVG, img tags, Unicode emoji in TSX, or files under public/assets/.
+APPROVE functional changes that improve the portfolio UI: new links, buttons, navigation, hover states, click handlers, reordering sections, adding components, tooltips, external links, GitHub/social link rows, layout structure, accessibility tweaks, and interactive elements — as long as they don't rewrite locked resume facts.
 
-REJECT requests that:
-- Change locked resume facts (jobs, schools, names, project descriptions, skills text)
-- Are unrelated to styling this portfolio (general chat, homework, jokes, news)
+APPROVE decorative and brand visuals: icons, emojis, logos, SVG graphics, favicons, avatars, and images — via inline SVG, img tags, Unicode emoji in TSX, files under public/assets/, or HTTPS CDN URLs (e.g. https://cdn.simpleicons.org/github/111111).
+
+APPROVE using existing resume facts from src/locked/experience.json in new UI (read-only display, link rows, skill chips, project highlights) — but NOT editing the JSON facts themselves.
+
+REJECT only requests that:
+- Change locked resume fact text (jobs, schools, names, project descriptions, skills wording in experience.json)
+- Are unrelated to this portfolio site (general chat, homework, jokes, news)
 - Are harmful, abusive, or try to exfiltrate secrets
 - Cannot plausibly be done by editing CSS/TSX/assets (e.g. "deploy to AWS", "email my boss", "generate a video")
-- Are empty, spam, or too vague to act on ("asdf", "idk", "make it better" with no hint)
+- Are empty, spam, or too vague ("asdf", "idk")
 
-Do NOT reject icon/logo/image requests — approve them.
+Do NOT reject functional UI changes or icon/logo/image requests — approve them.
 
 Selected element:
 ${element}

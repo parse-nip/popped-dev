@@ -1356,6 +1356,98 @@
     }
   }
 
+  .resume-quick-links {
+    padding: 1.25rem 1.5rem 0;
+    background: #ffffff;
+  }
+
+  .resume-quick-links-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem 1.5rem;
+    max-width: 52rem;
+    margin: 0 auto;
+    padding: 1rem 1.25rem;
+    border: 1px solid rgba(17, 17, 17, 0.08);
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.9), #ffffff);
+  }
+
+  .resume-quick-links-copy {
+    flex: 1 1 16rem;
+    min-width: 0;
+  }
+
+  .resume-quick-links-name {
+    margin: 0 0 0.35rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #111111;
+  }
+
+  .resume-quick-links-tagline {
+    margin: 0 0 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.45;
+    color: rgba(17, 17, 17, 0.68);
+  }
+
+  .resume-quick-links-skills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .resume-quick-links-skills li {
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid rgba(17, 17, 17, 0.08);
+    background: rgba(255, 255, 255, 0.9);
+    font-size: 0.72rem;
+    color: rgba(17, 17, 17, 0.72);
+    white-space: nowrap;
+  }
+
+  .resume-quick-links-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .resume-quick-links-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.45rem 0.7rem;
+    border-radius: 10px;
+    border: 1px solid rgba(17, 17, 17, 0.08);
+    background: #ffffff;
+    color: #111111;
+    font-size: 0.8125rem;
+    text-decoration: none;
+    transition:
+      border-color 120ms ease,
+      background 120ms ease;
+  }
+
+  .resume-quick-links-item:hover,
+  .resume-quick-links-item:focus-visible {
+    border-color: rgba(17, 17, 17, 0.16);
+    background: rgba(248, 250, 252, 0.95);
+  }
+
+  .resume-quick-links-icon {
+    display: block;
+    flex-shrink: 0;
+  }
+
   #locked-resume {
     padding: 2rem 1.5rem 3rem;
     background: #ffffff;

@@ -488,7 +488,7 @@ export function ElementChatPopup({
                   handleSend();
                 }
               }}
-              placeholder="Describe your design change…"
+              placeholder="Describe your change…"
               disabled={isThinking}
               aria-label="Message to design agent"
               className="element-chat-popup-input"
