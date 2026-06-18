@@ -1,10 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ElementChatPopup } from "@/components/design/ElementChatPopup";
 import { DraftConfirmBadge } from "@/components/design/DraftConfirmBadge";
+import { useDesignWorkspace } from "@/components/design/DesignWorkspaceProvider";
+import {
+  isDesignEmbedMessage,
+  type DesignEmbedElementContext,
+  type DesignEmbedRect,
+} from "@shared/design-embed-messages";
 import { buildElementContext, ensureDesignIdOnElement } from "@/lib/element-context";
+import type { ElementContext } from "@/lib/element-context";
 import { getElementLabel, getSelectableElement } from "@/lib/element-label";
 
 const HIGHLIGHT_INSET = 6;
@@ -17,13 +24,13 @@ type Rect = {
 };
 
 type HoverState = {
-  element: Element;
   label: string;
+  context: ElementContext;
 };
 
 type ChatState = {
-  element: Element;
   label: string;
+  context: ElementContext;
 };
 
 function expandRect(rect: DOMRect, inset: number): Rect {
@@ -39,7 +46,25 @@ function rectFromElement(element: Element, inset: number): Rect {
   return expandRect(element.getBoundingClientRect(), inset);
 }
 
+function offsetEmbedRect(iframe: HTMLIFrameElement, rect: DesignEmbedRect): Rect {
+  const frame = iframe.getBoundingClientRect();
+  return {
+    top: frame.top + rect.top,
+    left: frame.left + rect.left,
+    width: rect.width,
+    height: rect.height,
+  };
+}
+
+function embedContextToElementContext(context: DesignEmbedElementContext): ElementContext {
+  return context;
+}
+
 export function DesignSelectLayerActive() {
+  const { isReady, embedPreviewUrl } = useDesignWorkspace();
+  const useIframeSelection = isReady && Boolean(embedPreviewUrl);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
   const [hover, setHover] = useState<HoverState | null>(null);
   const [chat, setChat] = useState<ChatState | null>(null);
   const [highlight, setHighlight] = useState<Rect | null>(null);
@@ -52,18 +77,9 @@ export function DesignSelectLayerActive() {
     };
   }, []);
 
-  const updateHover = useCallback((target: EventTarget | null) => {
-    const element = getSelectableElement(target);
-    if (!element) {
-      setHover(null);
-      return;
-    }
-
-    setHover({
-      element,
-      label: getElementLabel(element),
-    });
-  }, []);
+  useEffect(() => {
+    iframeRef.current = document.querySelector<HTMLIFrameElement>(".design-workspace-iframe-host");
+  });
 
   const clearSelection = useCallback(() => {
     setChat(null);
@@ -71,58 +87,50 @@ export function DesignSelectLayerActive() {
     setHighlight(null);
   }, []);
 
-  const trackedElement = chat?.element ?? hover?.element;
-
-  useEffect(() => {
-    if (!trackedElement) {
+  const updateHover = useCallback((target: EventTarget | null) => {
+    const element = getSelectableElement(target);
+    if (!element) {
+      setHover(null);
       return;
     }
 
-    let frame = 0;
-
-    const syncHighlight = () => {
-      if (!document.contains(trackedElement)) {
-        clearSelection();
-        return;
-      }
-
-      setHighlight(rectFromElement(trackedElement, HIGHLIGHT_INSET));
-    };
-
-    const scheduleSync = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(syncHighlight);
-    };
-
-    scheduleSync();
-    window.addEventListener("scroll", scheduleSync, true);
-    window.addEventListener("resize", scheduleSync);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", scheduleSync, true);
-      window.removeEventListener("resize", scheduleSync);
-    };
-  }, [trackedElement, clearSelection]);
+    ensureDesignIdOnElement(element);
+    setHover({
+      label: getElementLabel(element),
+      context: buildElementContext(element),
+    });
+  }, []);
 
   useEffect(() => {
+    if (useIframeSelection) return;
+
+    const tracked = chat?.context.designId ?? hover?.context.designId;
+    if (!tracked) return;
+
+    // Static page highlight sync handled via DOM element lookup below
+  }, [useIframeSelection, chat, hover]);
+
+  useEffect(() => {
+    if (useIframeSelection) return;
+
     function handleMouseMove(event: MouseEvent) {
       if (chat || selectionLocked) return;
       updateHover(event.target);
+      const element = getSelectableElement(event.target);
+      setHighlight(element ? rectFromElement(element, HIGHLIGHT_INSET) : null);
     }
 
     function handleMouseLeave() {
       if (!chat && !selectionLocked) {
         setHover(null);
+        setHighlight(null);
       }
     }
 
     function handleClick(event: MouseEvent) {
       if (selectionLocked) {
         const target = event.target;
-        if (target instanceof Element && target.closest("[data-design-select-ui]")) {
-          return;
-        }
+        if (target instanceof Element && target.closest("[data-design-select-ui]")) return;
         event.preventDefault();
         event.stopPropagation();
         return;
@@ -134,10 +142,11 @@ export function DesignSelectLayerActive() {
       event.preventDefault();
       event.stopPropagation();
 
-      const label = getElementLabel(element);
       ensureDesignIdOnElement(element);
-      setChat({ element, label });
-      setHover({ element, label });
+      const context = buildElementContext(element);
+      setChat({ label: getElementLabel(element), context });
+      setHover({ label: getElementLabel(element), context });
+      setHighlight(rectFromElement(element, HIGHLIGHT_INSET));
     }
 
     document.addEventListener("mousemove", handleMouseMove);
@@ -149,9 +158,47 @@ export function DesignSelectLayerActive() {
       document.removeEventListener("mouseleave", handleMouseLeave);
       document.removeEventListener("click", handleClick, true);
     };
-  }, [chat, selectionLocked, updateHover]);
+  }, [chat, selectionLocked, updateHover, useIframeSelection]);
 
-  const displayHighlight = trackedElement ? highlight : null;
+  useEffect(() => {
+    if (!useIframeSelection) return;
+
+    function handleMessage(event: MessageEvent) {
+      if (!isDesignEmbedMessage(event.data)) return;
+
+      const iframe = iframeRef.current;
+      if (!iframe) return;
+
+      if (event.data.type === "clear") {
+        if (!chat && !selectionLocked) {
+          setHover(null);
+          setHighlight(null);
+        }
+        return;
+      }
+
+      const context = embedContextToElementContext(event.data.context);
+      const rect = offsetEmbedRect(iframe, event.data.rect);
+
+      if (event.data.type === "hover") {
+        if (chat || selectionLocked) return;
+        setHover({ label: context.label, context });
+        setHighlight(rect);
+        return;
+      }
+
+      if (selectionLocked) return;
+
+      setChat({ label: context.label, context });
+      setHover({ label: context.label, context });
+      setHighlight(rect);
+    }
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [useIframeSelection, chat, selectionLocked]);
+
+  const displayHighlight = highlight;
 
   return createPortal(
     <>
@@ -174,7 +221,7 @@ export function DesignSelectLayerActive() {
           <ElementChatPopup
             anchorRect={displayHighlight}
             elementLabel={chat.label}
-            elementContext={buildElementContext(chat.element)}
+            elementContext={chat.context}
             onClose={clearSelection}
             onSelectionLockChange={setSelectionLocked}
           />

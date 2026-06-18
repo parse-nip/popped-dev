@@ -1,5 +1,14 @@
-import { DesignMode } from "@/design/DesignMode";
+"use client";
 
-export default function DesignPage() {
-  return <DesignMode />;
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+export default function DesignRedirectPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/");
+  }, [router]);
+
+  return null;
 }

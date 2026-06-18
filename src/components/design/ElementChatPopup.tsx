@@ -8,13 +8,11 @@ import {
 } from "@/components/design/AgentActivityFeed";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
 import {
-  useDesignChanges,
   useSetAgentBusy,
 } from "@/components/design/DesignChangesProvider";
-import { streamDesignRun, type DesignStreamEvent } from "@/lib/agent-client";
+import { useDesignWorkspace } from "@/components/design/DesignWorkspaceProvider";
 import { readContributorName, subscribeContributorName, validateContributorName } from "@/lib/contributor-name";
 import type { ElementContext } from "@/lib/element-context";
-import { validatePatch } from "@/lib/design-patch";
 
 type Message = {
   id: string;
@@ -183,9 +181,9 @@ export function ElementChatPopup({
   const [dictationError, setDictationError] = useState<string | null>(null);
   const [layout, setLayout] = useState<PopupLayout>(() => getPopupLayout(anchorRect));
   const [contributorName, setContributorName] = useState(readContributorName);
-  const { state, setSelectedDesignId, setPendingPatch } = useDesignChanges();
   const setAgentBusy = useSetAgentBusy();
-  const showConfirm = Boolean(state.pendingPatch);
+  const { isReady, runAgentEdit } = useDesignWorkspace();
+  const showConfirm = false;
   const hasThread =
     phase === "running" ||
     (phase === "complete" && (messages.length > 0 || activitySteps.length > 0));
@@ -195,10 +193,6 @@ export function ElementChatPopup({
   const isLocked = phase === "running" || (phase === "complete" && showConfirm);
 
   useEffect(() => subscribeContributorName(setContributorName), []);
-
-  useEffect(() => {
-    setSelectedDesignId(elementContext.designId);
-  }, [elementContext.designId, setSelectedDesignId]);
 
   useEffect(() => {
     onSelectionLockChange?.(isLocked);
@@ -256,71 +250,12 @@ export function ElementChatPopup({
     [],
   );
 
-  useEffect(() => {
-    if (!showConfirm) return;
-    pushActivityStep({ id: "draft", label: "Styles applied — confirm below", state: "done" });
-  }, [showConfirm, pushActivityStep]);
-
   const finishRun = useCallback(() => {
     setIsThinking(false);
     setAgentBusy(false);
     setPhase("complete");
-    pushActivityStep({ id: "done", label: "Patch ready", state: "done" });
+    pushActivityStep({ id: "done", label: "Preview updated", state: "done" });
   }, [pushActivityStep, setAgentBusy]);
-
-  const handleStreamEvent = useCallback(
-    (event: DesignStreamEvent) => {
-      if (event.type === "assistant") {
-        updateAssistantMessage(event.text);
-        pushActivityStep({ id: "connect", label: "Patch generated", state: "done" });
-        return;
-      }
-
-      if (event.type === "step") {
-        pushActivityStep(event);
-        return;
-      }
-
-      if (event.type === "status") {
-        appendActivityMessage(event.message, `status-${event.message.slice(0, 24)}`, true);
-        return;
-      }
-
-      if (event.type === "draft_patch") {
-        try {
-          validatePatch(event.patch);
-          setPendingPatch(event.patch);
-          updateAssistantMessage(event.patch.summary);
-          pushActivityStep({ id: "apply", label: "Applied to page", state: "done" });
-        } catch (error) {
-          const message = error instanceof Error ? error.message : "Invalid patch returned.";
-          setActivityError(message);
-        }
-        return;
-      }
-
-      if (event.type === "error") {
-        setActivityError(event.message);
-        pushActivityStep({ id: "error", label: "Something went wrong", state: "done" });
-        setPhase("complete");
-        setIsThinking(false);
-        setAgentBusy(false);
-        return;
-      }
-
-      if (event.type === "done") {
-        finishRun();
-      }
-    },
-    [
-      appendActivityMessage,
-      finishRun,
-      pushActivityStep,
-      setAgentBusy,
-      setPendingPatch,
-      updateAssistantMessage,
-    ],
-  );
 
   const stopDictation = useCallback(() => {
     shouldListenRef.current = false;
@@ -444,6 +379,11 @@ export function ElementChatPopup({
     const trimmed = input.trim();
     if (!trimmed || isThinking) return;
 
+    if (!isReady) {
+      setActivityError("Live preview is still loading — wait a moment and try again.");
+      return;
+    }
+
     stopDictation();
     setActivitySteps([]);
     setActivityError(null);
@@ -463,15 +403,13 @@ export function ElementChatPopup({
     pushActivityStep({ id: "send", label: "Sending prompt", state: "running" });
 
     try {
-      await streamDesignRun(
-        {
-          prompt: trimmed,
-          elementContext,
-          acceptedPatches: state.acceptedPatches,
-        },
-        handleStreamEvent,
-      );
+      pushActivityStep({ id: "think", label: "Agent editing files", state: "running" });
+      const summary = await runAgentEdit(trimmed, elementContext);
+      updateAssistantMessage(summary);
       pushActivityStep({ id: "send", label: "Sent", state: "done" });
+      pushActivityStep({ id: "think", label: "Preview updated", state: "done" });
+      pushActivityStep({ id: "apply", label: "Applied in WebContainer", state: "done" });
+      finishRun();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Design request failed.";
       setActivityError(message);

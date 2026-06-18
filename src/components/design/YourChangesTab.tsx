@@ -2,41 +2,27 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { useDesignChanges } from "@/components/design/DesignChangesProvider";
 import { useDesignMode } from "@/components/design/DesignModeContext";
-import { fetchDesignBaseSha, publishDesignPatches } from "@/lib/agent-client";
+import { useDesignWorkspace } from "@/components/design/DesignWorkspaceProvider";
+import { summarizeDiff } from "@/design/diff";
 
 export function YourChangesTab() {
+  const { isDesignMode } = useDesignMode();
   const {
-    state,
-    pendingCount,
-    acceptedCount,
-    removeAcceptedPatch,
-    setPublishStatus,
-    finishPublish,
-  } = useDesignChanges();
-  const { setMode: setDesignMode, isDesignMode } = useDesignMode();
+    changes,
+    editEvents,
+    publish,
+    publishStatus,
+    publishError,
+    commitUrl,
+    isReady,
+  } = useDesignWorkspace();
   const [open, setOpen] = useState(false);
-  const [baseSha, setBaseSha] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const isDeploying = state.publishStatus === "deploying";
-  const isDeployed = state.publishStatus === "deployed";
-
-  const hasChanges =
-    state.pendingPatch !== null ||
-    state.acceptedPatches.length > 0 ||
-    state.deployHoldPatches.length > 0 ||
-    isDeploying ||
-    isDeployed ||
-    state.publishStatus === "published";
-
-  useEffect(() => {
-    if (!open) return;
-    void fetchDesignBaseSha()
-      .then(setBaseSha)
-      .catch(() => setBaseSha(null));
-  }, [open]);
+  const isDeploying = publishStatus === "deploying";
+  const isPublished = publishStatus === "published";
+  const hasChanges = changes.length > 0 || isDeploying || isPublished || Boolean(commitUrl);
 
   useEffect(() => {
     if (!open) return;
@@ -61,29 +47,17 @@ export function YourChangesTab() {
     };
   }, [open]);
 
-  if (!hasChanges) return null;
+  if (!isDesignMode || !hasChanges) return null;
 
   async function handlePublish() {
-    if (state.acceptedPatches.length === 0) return;
-
-    setPublishStatus("publishing");
-
+    if (changes.length === 0) return;
+    setOpen(true);
     try {
-      const sha = baseSha ?? (await fetchDesignBaseSha());
-      const patches = [...state.acceptedPatches];
-      const result = await publishDesignPatches({
-        acceptedPatches: patches,
-        baseSha: sha,
-      });
-      finishPublish(result.commitUrl, result.commitSha, patches);
-      setOpen(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Publish failed.";
-      setPublishStatus("failed", null, message);
+      await publish();
+    } catch {
+      // error stored on workspace
     }
   }
-
-  const holdCount = state.deployHoldPatches.length;
 
   return (
     <div
@@ -99,12 +73,9 @@ export function YourChangesTab() {
         onClick={() => setOpen((value) => !value)}
       >
         <span className="your-changes-tab-label">Your changes</span>
-        {pendingCount + acceptedCount > 0 ? (
-          <span
-            className="your-changes-tab-badge"
-            aria-label={`${pendingCount + acceptedCount} patches`}
-          >
-            {pendingCount + acceptedCount}
+        {changes.length > 0 ? (
+          <span className="your-changes-tab-badge" aria-label={`${changes.length} files changed`}>
+            {changes.length}
           </span>
         ) : null}
       </button>
@@ -113,90 +84,40 @@ export function YourChangesTab() {
         <div className="your-changes-panel-header">
           <p className="your-changes-panel-title">Your changes</p>
           <p className="your-changes-panel-subtitle">
-            Accepted changes preview instantly. Publish commits them to GitHub once.
+            Edits apply live in WebContainer. Publish commits once to GitHub.
           </p>
         </div>
 
-        {state.pendingPatch ? (
-          <p className="your-changes-pending-hint">
-            Pending: {state.pendingPatch.summary} — confirm on the page.
-          </p>
+        {changes.length > 0 ? (
+          <pre className="your-changes-diff">{summarizeDiff(changes)}</pre>
         ) : null}
 
-        <ul className="your-changes-list">
-          {state.acceptedPatches.map((patch) => (
-            <li key={patch.id}>
-              <div className="your-changes-item">
-                <div className="your-changes-item-main">
-                  <p className="your-changes-prompt">{patch.summary}</p>
-                  <p className="your-changes-meta">{patch.target.designId}</p>
-                </div>
-                <button
-                  type="button"
-                  className="your-changes-remove-btn"
-                  onClick={() => removeAcceptedPatch(patch.id)}
-                  aria-label={`Remove ${patch.summary}`}
-                >
-                  Remove
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-
-        {state.publishError ? (
-          <p className="your-changes-publish-error">{state.publishError}</p>
+        {editEvents[0]?.summary ? (
+          <p className="your-changes-latest">{editEvents[0].summary}</p>
         ) : null}
 
-        {isDeploying && state.publishUrl ? (
-          <p className="your-changes-publish-success">
-            Published —{" "}
-            <a href={state.publishUrl} target="_blank" rel="noreferrer">
-              view on GitHub
-            </a>
-            . Waiting for popped.dev to go live
-            {holdCount > 0 ? ` (keeping ${holdCount} patch${holdCount === 1 ? "" : "es"} visible)` : ""}…
-          </p>
-        ) : null}
+        {publishError ? <p className="your-changes-error">{publishError}</p> : null}
 
-        {isDeployed && state.publishUrl ? (
-          <p className="your-changes-publish-success">
-            Live on popped.dev —{" "}
-            <a href={state.publishUrl} target="_blank" rel="noreferrer">
-              view commit
+        {commitUrl ? (
+          <p className="your-changes-success">
+            <a href={commitUrl} target="_blank" rel="noreferrer">
+              View commit on GitHub
             </a>
           </p>
         ) : null}
 
-        <div className="your-changes-panel-footer">
+        {isDeploying ? (
+          <p className="your-changes-status">Deploying to popped.dev…</p>
+        ) : null}
+
+        <div className="your-changes-actions">
           <Button
             type="button"
-            size="sm"
-            disabled={
-              state.acceptedPatches.length === 0 ||
-              state.publishStatus === "publishing" ||
-              isDeploying ||
-              isDeployed
-            }
-            onClick={() => {
-              void handlePublish();
-            }}
+            disabled={!isReady || changes.length === 0 || publishStatus === "publishing"}
+            onClick={() => void handlePublish()}
           >
-            {state.publishStatus === "publishing"
-              ? "Publishing…"
-              : isDeploying
-                ? "Deploying…"
-                : `Publish ${state.acceptedPatches.length} patch${state.acceptedPatches.length === 1 ? "" : "es"}`}
+            {publishStatus === "publishing" ? "Publishing…" : "Publish to GitHub"}
           </Button>
-          {!isDesignMode ? (
-            <button
-              type="button"
-              className="your-changes-enter-design"
-              onClick={() => setDesignMode("design")}
-            >
-              Enter design mode
-            </button>
-          ) : null}
         </div>
       </div>
     </div>

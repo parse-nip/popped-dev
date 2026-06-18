@@ -117,7 +117,8 @@ export async function startDevServer(
     });
   });
 
-  const process = await container.spawn("npm", ["run", "dev"]);
+  // Turbopack needs native bindings unavailable in WebContainer — use Webpack.
+  const process = await container.spawn("npm", ["run", "dev:webpack"]);
   process.output.pipeTo(
     new WritableStream({
       write(chunk) {
