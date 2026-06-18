@@ -17,6 +17,12 @@ const EXCLUDED_PREFIXES = [
 const TEXT_FILE =
   /\.(tsx?|jsx?|json|css|mjs|cjs|md|svg|toml|example|html|txt|ico)$/i;
 
+/** Locked files still required at runtime in the design WebContainer (read-only). */
+const LOCKED_RUNTIME_FILES = new Set([
+  "src/locked/experience.json",
+  "src/components/locked/LockedIntro.tsx",
+]);
+
 function parseRepoUrl(repoUrl: string): { owner: string; repo: string } {
   const match = repoUrl.match(/github\.com\/([^/]+)\/([^/.]+)/i);
   if (!match) throw new Error(`Invalid GITHUB_REPO_URL: ${repoUrl}`);
@@ -29,7 +35,7 @@ function shouldIncludePath(path: string): boolean {
     return false;
   }
   if (path.includes("node_modules")) return false;
-  if (isLockedFactPath(path)) return path === "src/locked/experience.json";
+  if (isLockedFactPath(path)) return LOCKED_RUNTIME_FILES.has(path);
   if (isEditableWorkspacePath(path)) return true;
 
   if (!path.includes("/")) {

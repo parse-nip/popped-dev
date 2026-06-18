@@ -6,8 +6,7 @@ import {
   contributorNameErrorMessage,
   writeContributorName,
 } from "@/lib/contributor-name";
-
-const ATTRIBUTION_KEY = "popped.dev:contributor-name";
+import { ATTRIBUTION_KEY } from "@shared/contributor-name-validation";
 
 function readStoredName(): string {
   if (typeof window === "undefined") return "";
@@ -89,5 +88,3 @@ export function LockedIntro() {
     </section>
   );
 }
-
-export { ATTRIBUTION_KEY };

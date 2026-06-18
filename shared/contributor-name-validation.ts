@@ -1,3 +1,4 @@
+export const ATTRIBUTION_KEY = "popped.dev:contributor-name";
 export const CONTRIBUTOR_NAME_MIN = 2;
 export const CONTRIBUTOR_NAME_MAX = 80;
 

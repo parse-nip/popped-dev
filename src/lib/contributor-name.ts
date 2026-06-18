@@ -1,5 +1,5 @@
-import { ATTRIBUTION_KEY } from "@/components/locked/LockedIntro";
 import {
+  ATTRIBUTION_KEY,
   validateContributorName,
   type ContributorNameValidation,
 } from "@shared/contributor-name-validation";

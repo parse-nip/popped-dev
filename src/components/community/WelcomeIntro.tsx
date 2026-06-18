@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { ATTRIBUTION_KEY } from "@/components/locked/LockedIntro";
+import { ATTRIBUTION_KEY } from "@shared/contributor-name-validation";
 import { contributorNameErrorMessage, validateContributorName, writeContributorName } from "@/lib/contributor-name";
 import { Input } from "@/components/ui/input";
 import { DesignSwitchPreview } from "@/components/community/DesignSwitchPreview";
