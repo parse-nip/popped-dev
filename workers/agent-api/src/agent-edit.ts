@@ -1,5 +1,6 @@
 import type { Env } from "./types";
 import { isLockedFactPath } from "../../../shared/locked-fact-files";
+import type { AgentEditFixContext } from "../../../shared/design-fix-loop";
 import { DESIGN_ICON_URLS } from "../../../shared/design-web-images";
 import { requireApprovedDesignRequest } from "./approve-design-request";
 import { resolveWebAssets } from "./fetch-web-asset";
@@ -15,6 +16,7 @@ export type AgentEditInput = {
     sourceFile?: string;
   } | null;
   files: Record<string, string>;
+  fixContext?: AgentEditFixContext | null;
 };
 
 export type AgentEditWrite = {
@@ -73,6 +75,24 @@ Rules:
 - commands: only npm install lines if new packages are needed; otherwise [].
 - Keep changes minimal and focused on the user request.`;
 
+const FIX_SYSTEM_PROMPT = `You fix compile/build errors in popped.dev — a Next.js community portfolio.
+A previous AI edit broke the preview. Return ONLY one valid JSON object (no markdown fences):
+{
+  "summary": "<one sentence>",
+  "writes": [{ "path": "src/app/design-overrides.css", "content": "<full corrected file content>" }],
+  "commands": [],
+  "assets": []
+}
+
+Rules:
+- Fix the reported error with the smallest correct change.
+- Return FULL file contents for each write (not diffs).
+- NEVER modify locked fact files: src/locked/experience.json, src/locked/*, src/components/locked/LockedIntro.tsx.
+- NEVER write src/components/locked/LockedResume.tsx.
+- Prefer fixing the files that caused the error; use src/app/design-overrides.css, src/components/community/*, src/app/globals.css, src/components/SiteHeader.tsx.
+- If imports or syntax are wrong, fix them. If a package is missing, add npm install in commands.
+- Do not introduce unrelated changes.`;
+
 function buildEditPrompt(input: AgentEditInput): string {
   const fileList = Object.keys(input.files)
     .slice(0, 20)
@@ -104,6 +124,44 @@ ${fileContents}
 ${experienceBlock}
 User request:
 ${input.prompt}`;
+}
+
+function buildFixPrompt(input: AgentEditInput): string {
+  const fix = input.fixContext;
+  if (!fix) return buildEditPrompt(input);
+
+  const fileList = Object.keys(input.files)
+    .slice(0, 24)
+    .map((path) => `- ${path}`)
+    .join("\n");
+
+  const fileContents = Object.entries(input.files)
+    .slice(0, 6)
+    .map(([path, content]) => `### ${path}\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\``)
+    .join("\n\n");
+
+  const element = input.selectedElement
+    ? JSON.stringify(input.selectedElement, null, 2)
+    : "null";
+
+  return `Fix attempt ${fix.attempt} of ${fix.maxAttempts}.
+
+Original user request:
+${fix.originalPrompt ?? input.prompt}
+
+Compile/build error:
+${fix.compileError}
+
+Selected element:
+${element}
+
+Available files:
+${fileList}
+
+Current file contents (includes broken state):
+${fileContents}
+
+Return corrected files that fix the error.`;
 }
 
 function fallbackEdit(input: AgentEditInput): AgentEditResult {
@@ -238,19 +296,63 @@ function openRouterErrorMessage(result: OpenRouterChatResult): string {
   return `OpenRouter did not return an edit. ${result.error}`;
 }
 
-async function callDesignLlm(env: Env, prompt: string): Promise<OpenRouterChatResult> {
+async function callDesignLlm(
+  env: Env,
+  systemPrompt: string,
+  userPrompt: string,
+): Promise<OpenRouterChatResult> {
   return openRouterChat(
     env,
     [
-      { role: "system", content: EDIT_SYSTEM_PROMPT },
-      { role: "user", content: prompt },
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
     ],
     {
-      // Keep output budget low — OpenRouter keys with small daily limits fail at 8192 max_tokens (HTTP 402).
       maxTokens: 1200,
       temperature: 0.2,
     },
   );
+}
+
+async function runLlmEditPass(
+  env: Env,
+  input: AgentEditInput,
+  emit: AgentEditStreamEmit | undefined,
+  options: { systemPrompt: string; userPrompt: string; strict: boolean },
+): Promise<AgentEditResult> {
+  const model = resolveOpenRouterModel(env);
+  const hasOpenRouter = Boolean(env.OPENROUTER_API_KEY?.trim());
+
+  if (hasOpenRouter) {
+    emit?.("status", { message: `Agent is working… (${model})`, model });
+  }
+
+  const aiResult = await callDesignLlm(env, options.systemPrompt, options.userPrompt);
+
+  if (hasOpenRouter) {
+    if (!aiResult.text) {
+      throw new Error(openRouterErrorMessage(aiResult));
+    }
+
+    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
+    if (!parsed) {
+      throw new Error("The AI returned an invalid edit — try rephrasing your request.");
+    }
+
+    emit?.("status", { message: "Edit ready — applying…", model });
+    return finalizeAgentEditResult(parsed, input, options.strict);
+  }
+
+  if (aiResult.text) {
+    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
+    if (parsed) {
+      emit?.("status", { message: "Edit ready — applying…" });
+      return finalizeAgentEditResult(parsed, input, options.strict);
+    }
+  }
+
+  emit?.("status", { message: "Using fallback edit…" });
+  return fallbackEdit(input);
 }
 
 export async function runAgentEdit(
@@ -265,40 +367,26 @@ export async function runAgentEdit(
     throw new Error("No project files provided.");
   }
 
+  if (input.fixContext) {
+    const { attempt, maxAttempts } = input.fixContext;
+    emit?.("status", {
+      message: `Fixing build error (${attempt}/${maxAttempts})…`,
+      fixAttempt: attempt,
+      maxFixAttempts: maxAttempts,
+    });
+
+    return runLlmEditPass(env, input, emit, {
+      systemPrompt: FIX_SYSTEM_PROMPT,
+      userPrompt: buildFixPrompt(input),
+      strict: true,
+    });
+  }
+
   await requireApprovedDesignRequest(env, input, emit);
 
-  const model = resolveOpenRouterModel(env);
-  const hasOpenRouter = Boolean(env.OPENROUTER_API_KEY?.trim());
-
-  if (hasOpenRouter) {
-    emit?.("status", { message: `Agent is working… (${model})`, model });
-  }
-
-  const prompt = buildEditPrompt(input);
-  const aiResult = await callDesignLlm(env, prompt);
-
-  if (hasOpenRouter) {
-    if (!aiResult.text) {
-      throw new Error(openRouterErrorMessage(aiResult));
-    }
-
-    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
-    if (!parsed) {
-      throw new Error("The AI returned an invalid edit — try rephrasing your request.");
-    }
-
-    emit?.("status", { message: "Edit ready — applying…", model });
-    return finalizeAgentEditResult(parsed, input, true);
-  }
-
-  if (aiResult.text) {
-    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
-    if (parsed) {
-      emit?.("status", { message: "Edit ready — applying…" });
-      return finalizeAgentEditResult(parsed, input);
-    }
-  }
-
-  emit?.("status", { message: "Using fallback edit…" });
-  return fallbackEdit(input);
+  return runLlmEditPass(env, input, emit, {
+    systemPrompt: EDIT_SYSTEM_PROMPT,
+    userPrompt: buildEditPrompt(input),
+    strict: true,
+  });
 }

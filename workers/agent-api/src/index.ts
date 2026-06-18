@@ -1403,6 +1403,7 @@ app.post("/api/agent/edit", async (c) => {
     selectedElement?: unknown;
     files?: Record<string, string>;
     stream?: boolean;
+    fixContext?: AgentEditInput["fixContext"];
   };
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
@@ -1424,6 +1425,10 @@ app.post("/api/agent/edit", async (c) => {
     prompt,
     selectedElement,
     files,
+    fixContext:
+      body.fixContext && typeof body.fixContext === "object"
+        ? (body.fixContext as AgentEditInput["fixContext"])
+        : null,
   };
 
   const wantsStream =

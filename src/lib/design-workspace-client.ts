@@ -5,6 +5,7 @@ import type {
   PublishResponse,
 } from "@/design/types";
 import { DEFAULT_OPENROUTER_MODEL } from "@shared/openrouter-config";
+import type { AgentEditFixContext } from "@shared/design-fix-loop";
 
 const PAGES_AGENT_API = "https://popped-dev-agent-api.parse-nip.workers.dev";
 
@@ -92,6 +93,7 @@ export async function requestAgentEdit(
     prompt: string;
     files: Record<string, string>;
     selectedElement?: unknown;
+    fixContext?: AgentEditFixContext | null;
   },
   handlers: AgentEditStreamHandlers = {},
 ): Promise<AgentEditResponse> {

@@ -19,7 +19,9 @@ import {
   requestAgentEdit,
 } from "@/lib/design-workspace-client";
 import type { ElementContext } from "@/lib/element-context";
-import type { DesignWorkspaceStatus, EditEvent, FileChange, StatusBarTone } from "@/design/types";
+import type { DesignWorkspaceStatus, EditEvent, FileChange, StatusBarTone, AgentEditResponse } from "@/design/types";
+import { waitForCompileResult } from "@/design/compile-errors";
+import { DESIGN_FIX_MAX_ATTEMPTS } from "@shared/design-fix-loop";
 import {
   bootWebContainer,
   exportChangedFiles,
@@ -65,6 +67,30 @@ const DesignWorkspaceContext = createContext<DesignWorkspaceContextValue | null>
 
 function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+}
+
+async function snapshotFilePaths(
+  container: WebContainer,
+  paths: string[],
+): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  for (const path of paths) {
+    try {
+      snapshot[path] = await readFile(container, path);
+    } catch {
+      // File did not exist before this edit batch.
+    }
+  }
+  return snapshot;
+}
+
+async function restoreFileSnapshot(
+  container: WebContainer,
+  snapshot: Record<string, string>,
+): Promise<void> {
+  for (const [path, content] of Object.entries(snapshot)) {
+    await writeFile(container, path, content);
+  }
 }
 
 export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
@@ -230,39 +256,43 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       const allFiles = await listTrackedFiles(container);
       const contextFiles = pickContextFiles(allFiles, elementContext.suggestedFiles);
 
-      let result;
+      const selectedElementPayload = {
+        designId: elementContext.designId,
+        tagName: elementContext.tagName,
+        text: elementContext.textPreview,
+        selector: elementContext.selector,
+        sourceFile: elementContext.sourceFile,
+      };
+
+      const editHandlers = {
+        onStatus: (message: string) => {
+          setStatusDetail(message);
+          if (/agent is working/i.test(message)) {
+            setStatusBarTone("default");
+          }
+        },
+        onApproved: (reason: string) => {
+          setStatusBarTone("approved");
+          setStatusDetail(reason);
+          approvedFlashTimeoutRef.current = window.setTimeout(() => {
+            setStatusBarTone("default");
+            approvedFlashTimeoutRef.current = null;
+          }, 1400);
+        },
+        onRejected: () => {
+          setStatusBarTone("rejected");
+        },
+      };
+
+      let result: AgentEditResponse;
       try {
         result = await requestAgentEdit(
           {
             prompt,
             files: contextFiles,
-            selectedElement: {
-              designId: elementContext.designId,
-              tagName: elementContext.tagName,
-              text: elementContext.textPreview,
-              selector: elementContext.selector,
-              sourceFile: elementContext.sourceFile,
-            },
+            selectedElement: selectedElementPayload,
           },
-          {
-            onStatus: (message) => {
-              setStatusDetail(message);
-              if (/agent is working/i.test(message)) {
-                setStatusBarTone("default");
-              }
-            },
-            onApproved: (reason) => {
-              setStatusBarTone("approved");
-              setStatusDetail(reason);
-              approvedFlashTimeoutRef.current = window.setTimeout(() => {
-                setStatusBarTone("default");
-                approvedFlashTimeoutRef.current = null;
-              }, 1400);
-            },
-            onRejected: () => {
-              setStatusBarTone("rejected");
-            },
-          },
+          editHandlers,
         );
       } catch (editError) {
         const message =
@@ -278,45 +308,117 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
         throw new Error("Agent returned no file changes.");
       }
 
+      const preEditSnapshot = await snapshotFilePaths(
+        container,
+        result.writes.map((write) => write.path),
+      );
+
       try {
         setStatusBarTone("default");
-        setStatus("applying_changes");
-        setStatusDetail(`Updating ${result.writes.length} file${result.writes.length === 1 ? "" : "s"}…`);
+        let fixAttempt = 0;
+        let lastCompileError: string | null = null;
 
-        for (const write of result.writes) {
-          await writeFile(container, write.path, write.content);
-        }
-
-        if (result.commands.length > 0) {
-          setStatus("installing_packages");
-          setStatusDetail(null);
-          const packageJson = await readFile(container, "package.json");
-          const reporter = createInstallProgressReporter(packageJson, (percent) =>
-            setProgressPercent(percent),
+        while (true) {
+          setStatus("applying_changes");
+          setStatusDetail(
+            fixAttempt === 0
+              ? `Updating ${result.writes.length} file${result.writes.length === 1 ? "" : "s"}…`
+              : `Applying fix (${fixAttempt}/${DESIGN_FIX_MAX_ATTEMPTS})…`,
           );
 
-          try {
-            for (const command of result.commands) {
-              const code = await runShellCommand(container, command, (chunk) => {
-                appendLog(chunk);
-                if (command.trim().startsWith("npm install")) {
-                  reporter.ingest(chunk);
-                }
-              });
-              if (code !== 0) throw new Error(`Command failed: ${command}`);
-            }
-            reporter.finish();
-          } catch (error) {
-            reporter.cancel();
-            throw error;
+          for (const write of result.writes) {
+            await writeFile(container, write.path, write.content);
           }
-        } else {
-          setProgressPercent(null);
-        }
 
-        bumpPreview();
-        setStatusDetail("Refreshing preview…");
-        await new Promise((resolve) => window.setTimeout(resolve, 600));
+          if (result.commands.length > 0) {
+            setStatus("installing_packages");
+            setStatusDetail(null);
+            const packageJson = await readFile(container, "package.json");
+            const reporter = createInstallProgressReporter(packageJson, (percent) =>
+              setProgressPercent(percent),
+            );
+
+            try {
+              for (const command of result.commands) {
+                const code = await runShellCommand(container, command, (chunk) => {
+                  appendLog(chunk);
+                  if (command.trim().startsWith("npm install")) {
+                    reporter.ingest(chunk);
+                  }
+                });
+                if (code !== 0) {
+                  const tail = stripAnsi(devLogRef.current).slice(-1500);
+                  throw new Error(
+                    tail.trim()
+                      ? `Command failed: ${command}\n${tail}`
+                      : `Command failed: ${command}`,
+                  );
+                }
+              }
+              reporter.finish();
+            } catch (error) {
+              reporter.cancel();
+              throw error;
+            }
+          } else {
+            setProgressPercent(null);
+          }
+
+          const logStart = devLogRef.current.length;
+          bumpPreview();
+          setStatusDetail("Checking preview build…");
+          const compile = await waitForCompileResult(() => devLogRef.current, logStart);
+
+          if (compile.ok && compile.error === null) {
+            break;
+          }
+
+          lastCompileError =
+            compile.error ??
+            (stripAnsi(compile.newLog).trim().slice(-1200) ||
+              "Preview failed to compile after the last edit.");
+
+          fixAttempt += 1;
+          if (fixAttempt >= DESIGN_FIX_MAX_ATTEMPTS) {
+            await restoreFileSnapshot(container, preEditSnapshot);
+            bumpPreview();
+            throw new Error(
+              `Build still failing after ${DESIGN_FIX_MAX_ATTEMPTS} automatic fix attempts. ${lastCompileError.slice(0, 400)}`,
+            );
+          }
+
+          setStatus("agent_editing");
+          setStatusBarTone("default");
+          setStatusDetail(`Fixing build error (${fixAttempt}/${DESIGN_FIX_MAX_ATTEMPTS})…`);
+
+          const fixFiles = pickContextFiles(
+            await listTrackedFiles(container),
+            elementContext.suggestedFiles,
+          );
+
+          result = await requestAgentEdit(
+            {
+              prompt: "Fix the compile error from the previous edit.",
+              files: fixFiles,
+              selectedElement: selectedElementPayload,
+              fixContext: {
+                compileError: lastCompileError,
+                attempt: fixAttempt,
+                maxAttempts: DESIGN_FIX_MAX_ATTEMPTS,
+                originalPrompt: prompt,
+              },
+            },
+            {
+              onStatus: (message) => setStatusDetail(message),
+            },
+          );
+
+          if (!result.writes?.length) {
+            await restoreFileSnapshot(container, preEditSnapshot);
+            bumpPreview();
+            throw new Error("Agent could not produce a fix for the build error.");
+          }
+        }
 
         setEditEvents((prev) => [
           {
