@@ -1,3 +1,8 @@
+import {
+  boltActionsToEditResult,
+  parseBoltActions,
+} from "../../../shared/bolt-action-parser";
+
 export type ParsedAgentEditWrite = {
   path: string;
   content: string;
@@ -10,10 +15,10 @@ export type ParsedAgentEditResult = {
   assets?: Array<{ url: string; path: string }>;
 };
 
-const MAX_PARSE_RETRIES = 2;
+const MAX_PARSE_RETRIES = 3;
 
 export const AGENT_EDIT_JSON_RETRY_NUDGE =
-  "Your last reply was not valid JSON. Return ONLY one JSON object with keys: summary (string), writes (array of {path, content}), commands (array). No markdown fences, no prose.";
+  "Your last reply was not valid JSON or boltArtifact. Return a <boltArtifact> with <boltAction type=\"file\" filePath=\"...\"> blocks, OR one JSON object: { summary, writes: [{path, content}], commands: [] }. No markdown fences, no prose.";
 
 export { MAX_PARSE_RETRIES };
 
@@ -100,7 +105,9 @@ export function parseAgentEditResult(raw: unknown): ParsedAgentEditResult | null
         ? write.path
         : typeof write.file === "string"
           ? write.file
-          : null;
+          : typeof write.filePath === "string"
+            ? write.filePath
+            : null;
     const content =
       typeof write.content === "string"
         ? write.content
@@ -135,6 +142,24 @@ export function parseAgentEditResult(raw: unknown): ParsedAgentEditResult | null
   return { summary, writes, commands, assets: assets.length ? assets : undefined };
 }
 
+function parseBoltArtifactText(text: string): ParsedAgentEditResult | null {
+  const artifact = parseBoltActions(text);
+  if (!artifact) return null;
+
+  const converted = boltActionsToEditResult(artifact);
+  if (converted.writes.length === 0 && converted.commands.length === 0) return null;
+
+  return {
+    summary: converted.summary,
+    writes: converted.writes,
+    commands: converted.commands,
+  };
+}
+
+/** Parse model output — tries bolt.new XML format first, then JSON. */
 export function parseAgentEditFromText(text: string): ParsedAgentEditResult | null {
+  const bolt = parseBoltArtifactText(text);
+  if (bolt) return bolt;
+
   return parseAgentEditResult(extractJsonObject(text));
 }
