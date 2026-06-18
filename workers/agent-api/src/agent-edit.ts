@@ -57,6 +57,8 @@ The JSON must match this shape:
 Rules:
 - You may edit ANY file in the project except locked fact files (see below). Create new files freely under src/, public/, shared/, scripts/.
 - Multi-file changes are normal — add a component AND wire it in layout/page, update CSS AND TSX, refactor imports across files, etc.
+- **CRITICAL wiring:** New UI must render on the site. Always import and render new components from src/components/community/CommunityChrome.tsx and/or src/components/HomeShell.tsx. A new .tsx file alone is invisible.
+- Prefer CommunityChrome.tsx for sidebars, overlays, and extra chrome.
 - Return FULL file contents for every file in writes[] (not diffs). Include every file you create or modify.
 - NEVER modify locked fact files: src/locked/experience.json, src/locked/manifest.json, src/components/locked/LockedIntro.tsx, or any path under src/locked/.
 - You MAY edit src/components/locked/LockedResume.tsx for layout/styling (never reword fact text).

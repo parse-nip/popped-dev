@@ -7,6 +7,7 @@ const BOOTSTRAP_PATHS = [
   "src/app/globals.css",
   "src/app/design-overrides.css",
   "src/components/SiteHeader.tsx",
+  "src/components/community/CommunityChrome.tsx",
   "src/components/locked/LockedResume.tsx",
   "src/locked/experience.json",
 ];

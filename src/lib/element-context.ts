@@ -44,7 +44,12 @@ function getSuggestedFiles(
   contributionId?: string,
   sourceFile?: string,
 ): string[] {
-  const appShell = ["src/app/layout.tsx", "src/app/page.tsx"];
+  const appShell = [
+    "src/components/community/CommunityChrome.tsx",
+    "src/components/HomeShell.tsx",
+    "src/app/layout.tsx",
+    "src/app/page.tsx",
+  ];
   const styling = ["src/app/globals.css", "src/app/design-overrides.css"];
   const editableSource =
     sourceFile && !sourceFile.includes("experience.json") && !sourceFile.includes("LockedIntro")

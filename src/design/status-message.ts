@@ -63,8 +63,9 @@ export function resolveDesignStatusMessage(input: StatusMessageInput): string | 
     return null;
   }
 
-  if (input.status === "ready_to_publish" && input.showLivePreview) {
-    return STATUS_LABELS.ready_to_publish;
+  if (input.status === "ready_to_publish") {
+    if (input.statusDetail) return input.statusDetail;
+    if (input.showLivePreview) return STATUS_LABELS.ready_to_publish;
   }
 
   if (input.status === "published") {

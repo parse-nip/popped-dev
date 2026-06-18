@@ -13,6 +13,10 @@ import {
 import { useDesignMode } from "@/components/design/DesignModeContext";
 import { isDesignEmbedMessage } from "@shared/design-embed-messages";
 import {
+  findUnwiredCommunityComponents,
+  formatUnwiredComponentsMessage,
+} from "@shared/component-wiring";
+import {
   fetchProjectFiles,
   pollDeployStatus,
   publishWorkspaceChanges,
@@ -484,6 +488,67 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        let wiringWarning: string | null = null;
+        let trackedAfterEdit = await listTrackedFiles(container);
+        let unwired = findUnwiredCommunityComponents(result.writes, trackedAfterEdit);
+
+        if (unwired.length > 0) {
+          setStatus("agent_editing");
+          setStatusDetail(
+            `Connecting ${unwired.map((path) => path.split("/").pop()).join(", ")} to the page…`,
+          );
+
+          const wireResult = await requestAgentEdit(
+            {
+              prompt: `These components exist but are NOT visible because nothing imports/renders them: ${unwired.join(", ")}. Import and render them from src/components/community/CommunityChrome.tsx (preferred for sidebars/overlays) and/or src/components/HomeShell.tsx. Return full file contents for every file you change.`,
+              files: pickContextFiles(trackedAfterEdit, [
+                ...elementContext.suggestedFiles,
+                "src/components/community/CommunityChrome.tsx",
+                "src/components/HomeShell.tsx",
+              ]),
+              selectedElement: selectedElementPayload,
+            },
+            {
+              onStatus: (message) => setStatusDetail(message),
+            },
+          );
+
+          if (wireResult.writes?.length) {
+            setStatus("applying_changes");
+            for (const write of wireResult.writes) {
+              await writeFile(container, write.path, write.content);
+            }
+            result = {
+              ...wireResult,
+              summary: wireResult.summary || result.summary,
+              writes: [...new Map(
+                [...result.writes, ...wireResult.writes].map((write) => [write.path, write]),
+              ).values()],
+            };
+            bumpPreview();
+            setStatusDetail("Checking preview build…");
+            const wireLogStart = devLogRef.current.length;
+            const wireCompile = await waitForCompileResult(
+              () => devLogRef.current,
+              wireLogStart,
+            );
+            if (!wireCompile.ok) {
+              await restoreFileSnapshot(container, preEditSnapshot);
+              bumpPreview();
+              throw new Error(
+                wireCompile.error ??
+                  "Could not wire new components into the page — preview failed to compile.",
+              );
+            }
+            trackedAfterEdit = await listTrackedFiles(container);
+            unwired = findUnwiredCommunityComponents(result.writes, trackedAfterEdit);
+          }
+
+          if (unwired.length > 0) {
+            wiringWarning = formatUnwiredComponentsMessage(unwired);
+          }
+        }
+
         setEditEvents((prev) => [
           {
             id: crypto.randomUUID(),
@@ -495,10 +560,10 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
           ...prev,
         ]);
 
-        setStatusDetail(null);
+        setStatusDetail(wiringWarning);
         await refreshChanges();
         setStatus("ready_to_publish");
-        return result.summary;
+        return wiringWarning ? `${result.summary} — ${wiringWarning}` : result.summary;
       } catch (applyError) {
         const message =
           applyError instanceof Error ? applyError.message : "Could not apply design change.";

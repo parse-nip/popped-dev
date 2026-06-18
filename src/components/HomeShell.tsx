@@ -9,6 +9,7 @@ import { DesignModePreviewGuard } from "@/components/design/DesignModePreviewGua
 import { DesignSelectLayer } from "@/components/design/DesignSelectLayer";
 import { YourChangesTab } from "@/components/design/YourChangesTab";
 import { SiteHeader } from "@/components/SiteHeader";
+import { CommunityChrome } from "@/components/community/CommunityChrome";
 import { ContributionAttributionLayer } from "@/components/community/ContributionAttributionLayer";
 import { WelcomeIntro } from "@/components/community/WelcomeIntro";
 import { LockedResume } from "@/components/locked/LockedResume";
@@ -27,6 +28,7 @@ function HomeContent() {
         <DesignStatusMessage />
       </div>
       <div className="design-stage">
+        <CommunityChrome />
         <main
           className={`design-static-layer${showLivePreview ? " design-static-layer--hidden" : ""}`}
           data-design-select-root

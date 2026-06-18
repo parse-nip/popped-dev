@@ -72,14 +72,15 @@ export function YourChangesTab() {
         <div className="your-changes-panel-header">
           <p className="your-changes-panel-title">Your changes</p>
           <p className="your-changes-panel-subtitle">
-            Preview updates instantly in your browser. Publish sends styling files to GitHub, then deploys to popped.dev.
+            Preview updates instantly. Publish commits to GitHub and deploys — without publish, reload loses your work.
           </p>
         </div>
 
         <div className="your-changes-publish-guide">
           <p className="your-changes-publish-guide-title">What Publish to GitHub does</p>
           <ol className="your-changes-publish-guide-list">
-            <li>Commits your styling changes to the repo (not locked resume facts).</li>
+            <li>Commits your changes to the repo (not locked resume facts).</li>
+            <li>New components must render via CommunityChrome.tsx — the agent wires them automatically when possible.</li>
             <li>Cloudflare rebuilds popped.dev — the button shows Deploying… until it goes live.</li>
             <li>When deploy finishes you’ll see a green checkmark, then the page reloads with your changes.</li>
           </ol>
