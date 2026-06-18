@@ -114,8 +114,8 @@ export async function openRouterChat(
         max_tokens: options.maxTokens ?? 4096,
         temperature: options.temperature ?? 0.2,
         stream: false,
-        // Disable Gemini thinking — it can consume the output budget and return empty content.
         reasoning: { effort: "none" },
+        plugins: [{ id: "response-healing" }],
       }),
     });
 

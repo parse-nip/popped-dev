@@ -181,7 +181,9 @@ export async function publishWorkspaceChanges(
   changedPaths: string[];
 }> {
   if (!env.GITHUB_TOKEN) throw new Error("GITHUB_TOKEN required");
-  if (params.changes.length === 0) {
+
+  const changes = params.changes.filter((change) => !change.path.endsWith("/"));
+  if (changes.length === 0) {
     throw new Error("No file changes to publish.");
   }
 
@@ -192,7 +194,7 @@ export async function publishWorkspaceChanges(
     );
   }
 
-  const changedPaths = params.changes.map((c) => c.path);
+  const changedPaths = changes.map((c) => c.path);
   const lockedViolations = findLockedFactViolations(changedPaths);
   if (lockedViolations.length > 0 && !params.allowContentFactChanges) {
     throw new Error(
@@ -200,7 +202,7 @@ export async function publishWorkspaceChanges(
     );
   }
 
-  for (const change of params.changes) {
+  for (const change of changes) {
     if (change.action === "delete") {
       throw new Error(`File deletion not supported in MVP: ${change.path}`);
     }
@@ -213,10 +215,10 @@ export async function publishWorkspaceChanges(
   const baseBranch = env.GITHUB_DEFAULT_BRANCH ?? env.GITHUB_BRANCH ?? "main";
   const summary =
     params.summary?.trim() ||
-    `Design workspace publish (${params.changes.length} file${params.changes.length === 1 ? "" : "s"})`;
+    `Design workspace publish (${changes.length} file${changes.length === 1 ? "" : "s"})`;
   const message = `Design: ${summary} (by ${params.contributorName})`;
 
-  const fileUpdates = params.changes
+  const fileUpdates = changes
     .filter((c) => c.action !== "delete")
     .map((c) => ({ path: c.path, content: c.content }));
 

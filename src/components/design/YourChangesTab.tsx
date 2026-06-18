@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
 import { useDesignMode } from "@/components/design/DesignModeContext";
 import { useDesignWorkspace } from "@/components/design/DesignWorkspaceProvider";
 import { summarizeDiff } from "@/design/diff";
@@ -11,11 +10,9 @@ export function YourChangesTab() {
   const {
     changes,
     editEvents,
-    publish,
     publishStatus,
     publishError,
     commitUrl,
-    showLivePreview,
   } = useDesignWorkspace();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -48,16 +45,6 @@ export function YourChangesTab() {
   }, [open]);
 
   if (!isDesignMode || !hasChanges) return null;
-
-  async function handlePublish() {
-    if (changes.length === 0) return;
-    setOpen(true);
-    try {
-      await publish();
-    } catch {
-      // error stored on workspace
-    }
-  }
 
   return (
     <div
@@ -109,16 +96,6 @@ export function YourChangesTab() {
         {isDeploying ? (
           <p className="your-changes-status">Deploying to popped.dev…</p>
         ) : null}
-
-        <div className="your-changes-actions">
-          <Button
-            type="button"
-            disabled={!showLivePreview || changes.length === 0 || publishStatus === "publishing"}
-            onClick={() => void handlePublish()}
-          >
-            {publishStatus === "publishing" ? "Publishing…" : "Publish to GitHub"}
-          </Button>
-        </div>
       </div>
     </div>
   );

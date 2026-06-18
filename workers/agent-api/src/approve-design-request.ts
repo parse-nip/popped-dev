@@ -1,5 +1,6 @@
 import type { Env } from "./types";
 import type { AgentEditInput } from "./agent-edit";
+import { extractJsonObject } from "./agent-edit-parse";
 import { openRouterChat } from "./openrouter";
 
 export class DesignRequestRejectedError extends Error {
@@ -13,24 +14,6 @@ export type ApprovalResult = {
   approved: boolean;
   reason: string;
 };
-
-function extractJsonObject(text: string): unknown | null {
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{")) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      // fall through
-    }
-  }
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
-}
 
 function parseApproval(raw: unknown): ApprovalResult | null {
   if (!raw || typeof raw !== "object") return null;

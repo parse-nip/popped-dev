@@ -2,9 +2,19 @@ import type { Env } from "./types";
 import { isLockedFactPath } from "../../../shared/locked-fact-files";
 import type { AgentEditFixContext } from "../../../shared/design-fix-loop";
 import { DESIGN_ICON_URLS } from "../../../shared/design-web-images";
+import {
+  AGENT_EDIT_JSON_RETRY_NUDGE,
+  MAX_PARSE_RETRIES,
+  parseAgentEditFromText,
+} from "./agent-edit-parse";
 import { requireApprovedDesignRequest } from "./approve-design-request";
 import { resolveWebAssets } from "./fetch-web-asset";
-import { openRouterChat, resolveOpenRouterModel, type OpenRouterChatResult } from "./openrouter";
+import {
+  openRouterChat,
+  resolveOpenRouterModel,
+  type ChatMessage,
+  type OpenRouterChatResult,
+} from "./openrouter";
 
 export type AgentEditInput = {
   prompt: string;
@@ -33,24 +43,6 @@ export type AgentEditResult = {
 
 export type AgentEditStreamEmit = (event: string, data: Record<string, unknown>) => void;
 
-function extractJsonObject(text: string): unknown | null {
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{")) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-      // fall through
-    }
-  }
-  const match = trimmed.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    return JSON.parse(match[0]);
-  } catch {
-    return null;
-  }
-}
-
 const EDIT_SYSTEM_PROMPT = `You are a code editing assistant for popped.dev — a Next.js community portfolio.
 Return ONLY one valid JSON object (no markdown fences, no commentary).
 The JSON must match this shape:
@@ -58,12 +50,13 @@ The JSON must match this shape:
   "summary": "<one sentence>",
   "writes": [{ "path": "src/app/design-overrides.css", "content": "<full file content>" }],
   "commands": [],
-  "assets": [{ "url": "https://cdn.simpleicons.org/github/111111", "path": "public/assets/github.svg" }]
+  "assets": []
 }
 
 Rules:
+- For simple color, size, spacing, or border tweaks: ONLY append CSS to src/app/design-overrides.css — keep the response small.
 - Visual AND functional changes are allowed: styling, layout, links, buttons, navigation, new components, interactivity, section order, social link rows, tooltips, etc.
-- Return FULL file contents for each write (not diffs).
+- Return FULL file contents for each write (not diffs). Prefer one file when possible.
 - NEVER modify locked fact files: src/locked/experience.json, src/locked/*, src/components/locked/LockedIntro.tsx.
 - NEVER write src/components/locked/LockedResume.tsx — style resume sections via src/app/design-overrides.css using [data-design-id="..."] selectors, or add community components under src/components/community/.
 - You MAY read src/locked/experience.json for facts (name, links, skills, projects) and display them in new community TSX — but never change the JSON.
@@ -194,42 +187,6 @@ function fallbackEdit(input: AgentEditInput): AgentEditResult {
   };
 }
 
-function parseAgentEditResult(raw: unknown): AgentEditResult | null {
-  if (!raw || typeof raw !== "object") return null;
-  const data = raw as Record<string, unknown>;
-  if (typeof data.summary !== "string") return null;
-  if (!Array.isArray(data.writes)) return null;
-
-  const writes: AgentEditWrite[] = [];
-  for (const item of data.writes) {
-    if (!item || typeof item !== "object") continue;
-    const write = item as Record<string, unknown>;
-    if (typeof write.path !== "string" || typeof write.content !== "string") continue;
-    writes.push({ path: write.path, content: write.content });
-  }
-
-  const commands: string[] = [];
-  if (Array.isArray(data.commands)) {
-    for (const cmd of data.commands) {
-      if (typeof cmd === "string" && cmd.trim()) commands.push(cmd.trim());
-    }
-  }
-
-  if (writes.length === 0) return null;
-
-  const assets: Array<{ url: string; path: string }> = [];
-  if (Array.isArray(data.assets)) {
-    for (const item of data.assets) {
-      if (!item || typeof item !== "object") continue;
-      const asset = item as Record<string, unknown>;
-      if (typeof asset.url !== "string" || typeof asset.path !== "string") continue;
-      assets.push({ url: asset.url, path: asset.path });
-    }
-  }
-
-  return { summary: data.summary, writes, commands, assets: assets.length ? assets : undefined };
-}
-
 function isSafeAgentWritePath(path: string): boolean {
   if (isLockedFactPath(path)) return false;
   if (path.startsWith("src/components/locked/")) return false;
@@ -298,20 +255,12 @@ function openRouterErrorMessage(result: OpenRouterChatResult): string {
 
 async function callDesignLlm(
   env: Env,
-  systemPrompt: string,
-  userPrompt: string,
+  messages: ChatMessage[],
 ): Promise<OpenRouterChatResult> {
-  return openRouterChat(
-    env,
-    [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    {
-      maxTokens: 1200,
-      temperature: 0.2,
-    },
-  );
+  return openRouterChat(env, messages, {
+    maxTokens: 2048,
+    temperature: 0.15,
+  });
 }
 
 async function runLlmEditPass(
@@ -327,32 +276,56 @@ async function runLlmEditPass(
     emit?.("status", { message: `Agent is working… (${model})`, model });
   }
 
-  const aiResult = await callDesignLlm(env, options.systemPrompt, options.userPrompt);
+  let messages: ChatMessage[] = [
+    { role: "system", content: options.systemPrompt },
+    { role: "user", content: options.userPrompt },
+  ];
 
-  if (hasOpenRouter) {
-    if (!aiResult.text) {
+  let lastRawText: string | null = null;
+
+  for (let attempt = 0; attempt <= MAX_PARSE_RETRIES; attempt += 1) {
+    const aiResult = await callDesignLlm(env, messages);
+
+    if (hasOpenRouter && !aiResult.text) {
       throw new Error(openRouterErrorMessage(aiResult));
     }
 
-    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
-    if (!parsed) {
-      throw new Error("The AI returned an invalid edit — try rephrasing your request.");
-    }
+    if (!aiResult.text) break;
 
-    emit?.("status", { message: "Edit ready — applying…", model });
-    return finalizeAgentEditResult(parsed, input, options.strict);
-  }
-
-  if (aiResult.text) {
-    const parsed = parseAgentEditResult(extractJsonObject(aiResult.text));
+    lastRawText = aiResult.text;
+    const parsed = parseAgentEditFromText(aiResult.text);
     if (parsed) {
-      emit?.("status", { message: "Edit ready — applying…" });
+      emit?.("status", { message: "Edit ready — applying…", model });
       return finalizeAgentEditResult(parsed, input, options.strict);
     }
+
+    if (attempt < MAX_PARSE_RETRIES) {
+      emit?.("status", {
+        message: `Retrying — fixing response format (${attempt + 1}/${MAX_PARSE_RETRIES})…`,
+        model,
+      });
+      messages = [
+        ...messages,
+        { role: "assistant", content: aiResult.text.slice(0, 1200) },
+        { role: "user", content: AGENT_EDIT_JSON_RETRY_NUDGE },
+      ];
+    }
   }
 
-  emit?.("status", { message: "Using fallback edit…" });
-  return fallbackEdit(input);
+  if (!hasOpenRouter) {
+    emit?.("status", { message: "Using fallback edit…" });
+    return fallbackEdit(input);
+  }
+
+  if (!input.fixContext) {
+    console.warn("Agent edit parse failed, using CSS fallback. Raw:", lastRawText?.slice(0, 400));
+    emit?.("status", { message: "Using CSS fallback…" });
+    return fallbackEdit(input);
+  }
+
+  throw new Error(
+    "The AI returned an invalid fix — the build error may need a manual tweak.",
+  );
 }
 
 export async function runAgentEdit(

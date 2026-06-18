@@ -10,7 +10,6 @@ import { DesignSelectLayer } from "@/components/design/DesignSelectLayer";
 import { YourChangesTab } from "@/components/design/YourChangesTab";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ContributionAttributionLayer } from "@/components/community/ContributionAttributionLayer";
-import { ResumeQuickLinks } from "@/components/community/ResumeQuickLinks";
 import { WelcomeIntro } from "@/components/community/WelcomeIntro";
 import { LockedResume } from "@/components/locked/LockedResume";
 import { DesignEmbedListener } from "@/components/design/DesignEmbedListener";
@@ -33,7 +32,6 @@ function HomeContent() {
           data-design-select-root
         >
           <WelcomeIntro />
-          <ResumeQuickLinks />
           <LockedResume />
         </main>
         <DesignWorkspacePreview />

@@ -5,6 +5,7 @@ import { ContributorNameControl } from "@/components/community/ContributorNameCo
 import { useDesignChanges } from "@/components/design/DesignChangesProvider";
 import { useDesignMode } from "@/components/design/DesignModeContext";
 import { useDesignWorkspace } from "@/components/design/DesignWorkspaceProvider";
+import { Button } from "@/components/ui/button";
 import { formatCooldownRemaining } from "@/lib/merge-cooldown";
 import { useMergeCooldown } from "@/lib/use-merge-cooldown";
 import { isDraftPreviewEmbed } from "@/lib/draft-preview";
@@ -30,10 +31,49 @@ function DesignCursorIcon() {
 export function SiteHeader() {
   const { isDesignMode, toggleDesignMode } = useDesignMode();
   const { isAgentBusy } = useDesignChanges();
-  const { isBooting } = useDesignWorkspace();
+  const {
+    isBooting,
+    status,
+    changes,
+    publish,
+    publishStatus,
+    showLivePreview,
+    commitUrl,
+  } = useDesignWorkspace();
   const { active: mergeCooldownActive, remainingMs } = useMergeCooldown();
   const designDisabled = isDraftPreviewEmbed() || mergeCooldownActive;
   const designLockedOn = isAgentBusy && isDesignMode;
+
+  const showHeaderPublish =
+    isDesignMode &&
+    !designDisabled &&
+    changes.length > 0 &&
+    (status === "ready_to_publish" ||
+      publishStatus === "publishing" ||
+      publishStatus === "deploying" ||
+      publishStatus === "published");
+
+  const publishLabel =
+    publishStatus === "publishing"
+      ? "Publishing…"
+      : publishStatus === "deploying"
+        ? "Deploying…"
+        : publishStatus === "published" && commitUrl
+          ? "View on GitHub"
+          : "Publish to GitHub";
+
+  async function handleHeaderPublish() {
+    if (publishStatus === "published" && commitUrl) {
+      window.open(commitUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+    if (changes.length === 0 || publishStatus === "publishing") return;
+    try {
+      await publish();
+    } catch {
+      // error stored on workspace
+    }
+  }
 
   return (
     <header
@@ -47,6 +87,22 @@ export function SiteHeader() {
       </Link>
 
       <div className="site-header-actions">
+        {showHeaderPublish ? (
+          <Button
+            type="button"
+            size="sm"
+            className="site-header-publish-btn"
+            data-design-select-ui
+            disabled={
+              publishStatus === "publishing" ||
+              publishStatus === "deploying" ||
+              (!showLivePreview && publishStatus !== "published")
+            }
+            onClick={() => void handleHeaderPublish()}
+          >
+            {publishLabel}
+          </Button>
+        ) : null}
         <ContributorNameControl />
         {designDisabled ? (
           <span

@@ -21,7 +21,6 @@ let webcontainerInstance: WebContainer | null = null;
 const TRACKED_PREFIXES = ["src/", "public/", "shared/", "src/app/design-overrides.css"];
 const TRACKED_ROOT_FILES = new Set([
   "next.config.ts",
-  "tsconfig.json",
   "postcss.config.mjs",
   "components.json",
 ]);
@@ -34,6 +33,7 @@ export type WorkspaceSession = {
 };
 
 function shouldTrackPath(path: string): boolean {
+  if (!path || path.endsWith("/")) return false;
   if (TRACKED_ROOT_FILES.has(path)) return true;
   return TRACKED_PREFIXES.some((prefix) => path.startsWith(prefix));
 }

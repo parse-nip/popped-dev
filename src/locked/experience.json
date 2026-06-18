@@ -1,19 +1,38 @@
 {
   "profile": {
     "name": "parse-nip",
-    "tagline": "Developer building tools, games, data systems, and experiments on the web.",
+    "tagline": "Co-Founder & Product Engineer · building tools, data systems, and experiments on the web.",
     "links": [
       { "label": "github.com/parse-nip", "href": "https://github.com/parse-nip" },
+      { "label": "agentfirst.software", "href": "https://agentfirst.software" },
       { "label": "popped.dev", "href": "https://popped.dev" }
     ]
   },
   "about": "I ship full-stack and systems projects across TypeScript, Rust, Python, and more. I care about developer experience, pragmatic tooling, and projects that are fun to build and useful in practice. This site is a community-built portfolio — the facts below stay fixed; style them however you like.",
   "experience": [
     {
-      "id": "exp-independent",
-      "title": "Independent Developer",
-      "period": { "start": "2023", "end": null, "label": "2023 — present" },
-      "description": "Designing and shipping personal and open-source projects: vector databases, game prototypes, data tooling, certificate systems, and web apps deployed on Cloudflare Pages."
+      "id": "exp-edtech",
+      "title": "Co-Founder & Product Engineer",
+      "period": { "start": "2025-11", "end": null, "label": "Nov 2025 — present" },
+      "description": "Architected and deployed a full-stack AI-powered coding education platform using Next.js, TypeScript, and FastAPI, currently live in active school classrooms. Led user research and product strategy with educators. Designed the agentic lesson pipeline — AI that adapts to each student's pace without teacher intervention."
+    },
+    {
+      "id": "exp-fintech-intern",
+      "title": "Software Developer Intern",
+      "period": { "start": "2025-11", "end": "2026-05", "label": "Nov 2025 — May 2026" },
+      "description": "Engineered production-ready financial calculators in Python. Wrote comprehensive unit tests with FastAPI."
+    },
+    {
+      "id": "exp-agentfirst",
+      "title": "Co-Founder & Product Engineer — AgentFirst",
+      "period": { "start": "2025-11", "end": "2026-02", "label": "Nov 2025 — Feb 2026" },
+      "description": "Developing an open-source SDK enabling autonomous AI agents to execute transactions utilizing stablecoin payment rails. Designed the full developer-facing API surface and payment integration end-to-end."
+    },
+    {
+      "id": "exp-community",
+      "title": "Discord Automation Lead & Moderator",
+      "period": { "start": "2025-03", "end": "2025-09", "label": "Mar 2025 — Sep 2025" },
+      "description": "Scaled community operations as the first moderator for a server that grew to ~50,000 members. Built and shipped multiple AI-powered Discord bots replacing manual engagement workflows."
     },
     {
       "id": "exp-oss",
@@ -27,24 +46,12 @@
       "id": "edu-cs",
       "title": "Computer Science",
       "details": [
-        "Coursework includes systems and programming labs (e.g. CS106).",
-        "Ongoing — update this section with your institution and dates."
+        "Coursework includes systems and programming labs.",
+        "Ongoing."
       ]
     }
   ],
   "projects": [
-    {
-      "id": "proj-vector-baby",
-      "name": "vector-baby",
-      "href": "https://github.com/parse-nip/vector-baby",
-      "description": "Custom vector database — Rust."
-    },
-    {
-      "id": "proj-to-the-moon",
-      "name": "to-the-moon",
-      "href": "https://github.com/parse-nip/to-the-moon",
-      "description": "To The Moon — a Godot 4 physics/build game."
-    },
     {
       "id": "proj-buffet-clearers",
       "name": "buffet-clearers-overengineered",
@@ -58,28 +65,10 @@
       "description": "Data tooling and exploration around Y Combinator companies."
     },
     {
-      "id": "proj-ecert",
-      "name": "ECERT_NEW",
-      "href": "https://github.com/parse-nip/ECERT_NEW",
-      "description": "OpenAttestation batch issuance and embedded certificate renderer."
-    },
-    {
       "id": "proj-glhf",
       "name": "glhf-name-sales",
       "href": "https://github.com/parse-nip/glhf-name-sales",
       "description": "Commerce tooling for GLHF name sales."
-    },
-    {
-      "id": "proj-koshergpt",
-      "name": "koshergpt",
-      "href": "https://github.com/parse-nip/koshergpt",
-      "description": "AI application experiment — TypeScript."
-    },
-    {
-      "id": "proj-invidious",
-      "name": "BetterInvidious",
-      "href": "https://github.com/parse-nip/BetterInvidious",
-      "description": "Invidious instance with improved UI — Crystal."
     },
     {
       "id": "proj-trains",
@@ -97,7 +86,7 @@
   "skills": [
     "Languages: TypeScript, JavaScript, Rust, Python, GDScript, Crystal",
     "Frontend: React, Next.js, HTML/CSS",
-    "Backend & data: Node.js, vector search, ML/sklearn, REST APIs",
+    "Backend & data: Node.js, FastAPI, vector search, ML/sklearn, REST APIs",
     "Game dev: Godot 4",
     "Infra & deploy: Cloudflare Pages, Docker",
     "Tools: Git, GitHub, Cursor AI agents"
@@ -105,12 +94,13 @@
   "achievements": [
     "34+ public repositories on GitHub since 2023",
     "buffet-clearers-overengineered — 8 stars; end-to-end Telegram analytics pipeline with visualization and ML models",
+    "Contributed to OpenScreen (screen recording tooling)",
     "Built and deployed multiple popped.dev subdomains (trains.popped.dev, popped.dev)",
-    "Active open-source contributor across TypeScript, Rust, and Python codebases",
-    "Shipped certificate issuance tooling with OpenAttestation"
+    "Active open-source contributor across TypeScript, Rust, and Python codebases"
   ],
   "contact": [
     { "label": "GitHub", "value": "@parse-nip", "href": "https://github.com/parse-nip" },
+    { "label": "AgentFirst", "value": "agentfirst.software", "href": "https://agentfirst.software" },
     { "label": "Website", "value": "popped.dev", "href": "https://popped.dev" }
   ]
 }

@@ -1,11 +1,23 @@
 import type { FileChange } from "./types";
 
+/** Ignore zip directory entries and other non-file paths in diffs. */
+function isDiffablePath(path: string): boolean {
+  return Boolean(path) && !path.endsWith("/");
+}
+
+function normalizeFileContent(content: string): string {
+  return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd();
+}
+
 export function computeFileChanges(
   original: Record<string, string>,
   current: Record<string, string>,
 ): FileChange[] {
   const changes: FileChange[] = [];
-  const allPaths = new Set([...Object.keys(original), ...Object.keys(current)]);
+  const allPaths = new Set([
+    ...Object.keys(original).filter(isDiffablePath),
+    ...Object.keys(current).filter(isDiffablePath),
+  ]);
 
   for (const path of allPaths) {
     const before = original[path];
@@ -15,7 +27,11 @@ export function computeFileChanges(
       changes.push({ path, content: after, action: "create" });
     } else if (before !== undefined && after === undefined) {
       changes.push({ path, content: "", action: "delete" });
-    } else if (before !== undefined && after !== undefined && before !== after) {
+    } else if (
+      before !== undefined &&
+      after !== undefined &&
+      normalizeFileContent(before) !== normalizeFileContent(after)
+    ) {
       changes.push({ path, content: after, action: "modify" });
     }
   }

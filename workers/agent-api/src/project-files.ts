@@ -20,7 +20,8 @@ function parseRepoUrl(repoUrl: string): { owner: string; repo: string } {
 }
 
 function shouldIncludePath(path: string): boolean {
-  if (!path || EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+  if (!path || path.endsWith("/")) return false;
+  if (EXCLUDED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
     return false;
   }
   if (path.includes("node_modules")) return false;
