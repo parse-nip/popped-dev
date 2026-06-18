@@ -2,9 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { useDesignMode } from "@/components/design/DesignModeContext";
-import { usePreview } from "@/components/design/PreviewContext";
 import { ElementChatPopup } from "@/components/design/ElementChatPopup";
+import { DraftConfirmBadge } from "@/components/design/DraftConfirmBadge";
 import { buildElementContext } from "@/lib/element-context";
 import { getElementLabel, getSelectableElement } from "@/lib/element-label";
 
@@ -41,24 +40,10 @@ function rectFromElement(element: Element, inset: number): Rect {
 }
 
 export function DesignSelectLayerActive() {
-  const { showPreview } = usePreview();
-  const { setMode: setDesignMode } = useDesignMode();
   const [hover, setHover] = useState<HoverState | null>(null);
   const [chat, setChat] = useState<ChatState | null>(null);
   const [highlight, setHighlight] = useState<Rect | null>(null);
   const [selectionLocked, setSelectionLocked] = useState(false);
-
-  const handlePreviewReady = useCallback(
-    (params: Parameters<typeof showPreview>[0]) => {
-      showPreview(params);
-      setDesignMode("browse");
-      setChat(null);
-      setHover(null);
-      setHighlight(null);
-      window.scrollTo({ top: 0, behavior: "instant" });
-    },
-    [setDesignMode, showPreview],
-  );
 
   useEffect(() => {
     document.body.dataset.cursorMode = "design";
@@ -184,14 +169,20 @@ export function DesignSelectLayerActive() {
       ) : null}
 
       {chat && displayHighlight ? (
-        <ElementChatPopup
-          anchorRect={displayHighlight}
-          elementLabel={chat.label}
-          elementContext={buildElementContext(chat.element)}
-          onClose={clearSelection}
-          onSelectionLockChange={setSelectionLocked}
-          onPreviewReady={handlePreviewReady}
-        />
+        <>
+          <ElementChatPopup
+            anchorRect={displayHighlight}
+            elementLabel={chat.label}
+            elementContext={buildElementContext(chat.element)}
+            onClose={clearSelection}
+            onSelectionLockChange={setSelectionLocked}
+          />
+          <DraftConfirmBadge
+            anchorRect={displayHighlight}
+            onRejected={clearSelection}
+            onAccepted={clearSelection}
+          />
+        </>
       ) : null}
     </>,
     document.body,

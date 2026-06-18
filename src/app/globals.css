@@ -508,14 +508,22 @@
     gap: 10px;
     padding: 10px;
     border-radius: 12px;
+    width: 100%;
+    border: none;
+    background: transparent;
+    text-align: left;
   }
 
-  .your-changes-item + .your-changes-item {
-    margin-top: 2px;
+  .your-changes-item--clickable {
+    cursor: pointer;
   }
 
-  .your-changes-item:hover {
+  .your-changes-item--clickable:hover {
     background: rgba(0, 0, 0, 0.025);
+  }
+
+  .your-changes-list > li + li {
+    margin-top: 2px;
   }
 
   .your-changes-item-main {
@@ -560,14 +568,12 @@
     white-space: nowrap;
   }
 
-  .your-changes-status--queued,
-  .your-changes-status--working,
-  .your-changes-status--building {
+  .your-changes-status--working {
     background: var(--color-accent-amber);
     color: var(--color-accent-amber-text);
   }
 
-  .your-changes-status--live {
+  .your-changes-status--ready {
     background: var(--color-accent-green);
     color: var(--color-accent-green-text);
   }
@@ -578,19 +584,68 @@
   }
 
   .your-changes-view-btn {
-    border: none;
-    background: transparent;
-    padding: 0;
     color: rgba(17, 17, 17, 0.62);
     font-size: 11px;
     font-weight: 600;
-    cursor: pointer;
     text-decoration: underline;
     text-underline-offset: 2px;
   }
 
-  .your-changes-view-btn:hover {
+  .your-changes-item--clickable:hover .your-changes-view-btn {
     color: rgba(17, 17, 17, 0.88);
+  }
+
+  .change-run-panel {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 95;
+    width: min(360px, calc(100vw - 48px));
+    padding: 14px 16px 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: #ffffff;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.12);
+  }
+
+  .change-run-panel-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+  }
+
+  .change-run-panel-label {
+    margin: 0;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: rgba(17, 17, 17, 0.45);
+  }
+
+  .change-run-panel-prompt {
+    margin: 4px 0 0;
+    font-size: 14px;
+    line-height: 1.45;
+    color: rgba(17, 17, 17, 0.88);
+  }
+
+  .change-run-panel-close {
+    border: none;
+    background: transparent;
+    color: rgba(17, 17, 17, 0.45);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+
+  .change-run-panel-locked {
+    font-size: 12px;
+    color: rgba(17, 17, 17, 0.45);
+    white-space: nowrap;
   }
 
   body[data-cursor-mode="design"] [data-design-select-root] {
@@ -1316,6 +1371,80 @@
   .design-select-highlight--selected {
     border-color: #93c5fd;
     background: rgba(147, 197, 253, 0.16);
+  }
+
+  .draft-confirm-badge {
+    position: fixed;
+    z-index: 10001;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(17, 17, 17, 0.08);
+    background: rgba(255, 255, 255, 0.96);
+    box-shadow:
+      0 8px 24px rgba(17, 17, 17, 0.08),
+      0 1px 2px rgba(17, 17, 17, 0.04);
+    backdrop-filter: blur(12px);
+    animation: element-chat-popup-enter 140ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .draft-confirm-badge--success {
+    padding: 8px 12px;
+  }
+
+  .draft-confirm-badge-hint {
+    margin: 0;
+    max-width: 220px;
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: center;
+    color: rgba(17, 17, 17, 0.52);
+  }
+
+  .draft-confirm-badge-error {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.4;
+    text-align: center;
+    color: #a45f12;
+  }
+
+  .draft-confirm-badge-message {
+    font-size: 12px;
+    line-height: 1.4;
+    color: rgba(17, 17, 17, 0.72);
+  }
+
+  .draft-confirm-badge-message a {
+    color: rgba(17, 17, 17, 0.88);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .draft-confirm-badge-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .draft-confirm-badge-btn {
+    min-width: 36px;
+    height: 32px;
+    padding-inline: 12px;
+    gap: 6px;
+  }
+
+  .draft-confirm-badge-btn--reject {
+    color: rgba(17, 17, 17, 0.62);
+  }
+
+  .draft-confirm-badge-btn--accept {
+    background: rgba(17, 17, 17, 0.92);
+    color: #fff;
   }
 
   .element-chat-popup {

@@ -17,6 +17,7 @@ function nextMonotonicProgress(current: number, incoming: number): number {
 type PreviewFrameInnerProps = {
   compact: boolean;
   branch: string;
+  baselineSha: string | null;
   contextPreviewUrl: string | null;
   previewRevision: string | null;
   previewDeployReady: boolean;
@@ -26,6 +27,7 @@ type PreviewFrameInnerProps = {
 function PreviewFrameInner({
   compact,
   branch,
+  baselineSha,
   contextPreviewUrl,
   previewRevision,
   previewDeployReady,
@@ -37,6 +39,7 @@ function PreviewFrameInner({
   const [progress, setProgress] = useState(6);
   const [reloadKey, setReloadKey] = useState(0);
   const progressRef = useRef(6);
+  const loadedRevisionRef = useRef<string | null>(null);
 
   const setMonotonicProgress = useCallback((incoming: number) => {
     const next = nextMonotonicProgress(progressRef.current, incoming);
@@ -50,22 +53,14 @@ function PreviewFrameInner({
     async function resolvePreview() {
       try {
         for (let attempt = 0; attempt < 80; attempt += 1) {
-          if (previewDeployReady && contextPreviewUrl && previewRevision) {
-            setFrameRevision(previewRevision);
-            setFrameUrl(buildPreviewEmbedUrl(contextPreviewUrl, previewRevision));
-            setStatus("loading");
-            setMonotonicProgress(90);
-            return;
-          }
-
-          const result = await fetchPreviewUrl(branch);
+          const result = await fetchPreviewUrl(branch, baselineSha);
           if (cancelled) return;
 
           const revision = result.sha ?? previewRevision;
           updatePreviewUrl(result.previewUrl, result.sha ?? null);
           setMonotonicProgress(result.progress ?? 12 + attempt * 2);
 
-          if (result.ready) {
+          if (result.ready && revision) {
             setFrameRevision(revision);
             setFrameUrl(buildPreviewEmbedUrl(result.previewUrl, revision));
             setStatus("loading");
@@ -87,15 +82,19 @@ function PreviewFrameInner({
     return () => {
       cancelled = true;
     };
-  }, [
-    branch,
-    contextPreviewUrl,
-    previewRevision,
-    previewDeployReady,
-    reloadKey,
-    setMonotonicProgress,
-    updatePreviewUrl,
-  ]);
+  }, [branch, baselineSha, previewRevision, reloadKey, setMonotonicProgress, updatePreviewUrl]);
+
+  useEffect(() => {
+    if (!previewDeployReady || !contextPreviewUrl || !previewRevision) return;
+    if (loadedRevisionRef.current === previewRevision) return;
+
+    loadedRevisionRef.current = previewRevision;
+    const nextUrl = buildPreviewEmbedUrl(contextPreviewUrl, previewRevision);
+    setFrameRevision(previewRevision);
+    setFrameUrl(nextUrl);
+    setStatus("loading");
+    setMonotonicProgress(90);
+  }, [contextPreviewUrl, previewDeployReady, previewRevision, setMonotonicProgress]);
 
   useEffect(() => {
     if (status !== "loading") return;
@@ -157,6 +156,7 @@ export function PreviewFrame({ compact = false }: PreviewFrameProps) {
     branch,
     previewUrl: contextPreviewUrl,
     previewRevision,
+    previewBaselineSha,
     previewDeployReady,
     updatePreviewUrl,
   } = usePreview();
@@ -168,6 +168,7 @@ export function PreviewFrame({ compact = false }: PreviewFrameProps) {
       key={branch}
       compact={compact}
       branch={branch}
+      baselineSha={previewBaselineSha}
       contextPreviewUrl={contextPreviewUrl}
       previewRevision={previewRevision}
       previewDeployReady={previewDeployReady}

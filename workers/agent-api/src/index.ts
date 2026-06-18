@@ -29,9 +29,11 @@ import {
   resolvePagesPreviewUrl,
   isPreviewUrlLive,
   waitForBranchPreviewDeploy,
+  getBranchHeadShaForBranch,
   type BranchDeployStatus,
 } from "./pages-preview";
 import { branchForSession } from "./preview-url";
+import { resolveBranchDraft } from "./draft";
 import {
   checkMergeCooldown,
   checkRateLimit,
@@ -179,12 +181,14 @@ async function previewDeployForBranch(
   env: Env,
   branch: string,
   waitForDeploy: boolean,
+  baselineSha?: string | null,
 ): Promise<BranchDeployStatus> {
   const options = {
     branch,
     projectName: env.PAGES_PROJECT_NAME || "popped-dev",
     repoUrl: env.GITHUB_REPO_URL,
     githubToken: env.GITHUB_TOKEN,
+    baselineSha,
   };
 
   if (waitForDeploy && env.GITHUB_TOKEN) {
@@ -192,6 +196,14 @@ async function previewDeployForBranch(
   }
 
   return checkBranchPreviewDeploy(options);
+}
+
+async function captureRunBaseline(env: Env, branch: string): Promise<string | null> {
+  return getBranchHeadShaForBranch({
+    branch,
+    repoUrl: env.GITHUB_REPO_URL,
+    githubToken: env.GITHUB_TOKEN,
+  });
 }
 
 async function verifyDesignBranch(
@@ -225,6 +237,7 @@ type PreviewFlags = {
   previewEmitted: boolean;
   previewReady: boolean;
   assistantSent: boolean;
+  lastPreviewSha: string | null;
 };
 
 async function maybeEmitPreview(
@@ -232,12 +245,23 @@ async function maybeEmitPreview(
   branch: string,
   emit: SseEmitter,
   flags: PreviewFlags,
-): Promise<void> {
-  if (!branch || flags.previewEmitted) return;
+  baselineSha?: string | null,
+): Promise<boolean> {
+  if (!branch) return false;
 
-  const deploy = await previewDeployForBranch(env, branch, false);
+  const deploy = await previewDeployForBranch(env, branch, false, baselineSha);
+  const shaChanged = Boolean(deploy.sha && deploy.sha !== flags.lastPreviewSha);
+  const becameReady = deploy.ready && !flags.previewReady;
+
+  if (flags.previewEmitted && !becameReady && !shaChanged) {
+    return flags.previewReady;
+  }
+
   flags.previewEmitted = true;
-  flags.previewReady = deploy.ready;
+  flags.lastPreviewSha = deploy.sha ?? flags.lastPreviewSha;
+  if (deploy.ready) {
+    flags.previewReady = true;
+  }
 
   emit("preview", {
     previewUrl: deploy.previewUrl,
@@ -252,6 +276,23 @@ async function maybeEmitPreview(
     label: deploy.ready ? "Preview ready" : "Building preview",
     state: deploy.ready ? "done" : "running",
   });
+
+  return flags.previewReady;
+}
+
+async function waitForPreviewDeploy(
+  env: Env,
+  branch: string,
+  emit: SseEmitter,
+  flags: PreviewFlags,
+  baselineSha?: string | null,
+  maxAttempts = 60,
+): Promise<void> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const ready = await maybeEmitPreview(env, branch, emit, flags, baselineSha);
+    if (ready) return;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
 }
 
 type SseEmitter = (event: string, data: Record<string, unknown>) => void;
@@ -276,7 +317,7 @@ async function syncRunPreview(
 
   const terminal = isTerminalRunStatus(run.status);
   if (terminal && run.status === "FINISHED" && branch) {
-    await maybeEmitPreview(env, branch, emit, flags);
+    await maybeEmitPreview(env, branch, emit, flags, record.baselineSha ?? null);
   }
 
   await updateRun(env.SESSIONS, runId, {
@@ -313,7 +354,12 @@ function createPollRunStream(
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
-      const flags: PreviewFlags = { previewEmitted: false, previewReady: false, assistantSent: false };
+      const flags: PreviewFlags = {
+        previewEmitted: false,
+        previewReady: false,
+        assistantSent: false,
+        lastPreviewSha: null,
+      };
       emit("step", { id: "connect", label: "Reconnecting to agent", state: "running" });
 
       try {
@@ -340,7 +386,7 @@ function createPollRunStream(
             if (status === "FINISHED") {
               const branch = record.branch;
               if (branch) {
-                await maybeEmitPreview(env, branch, emit, flags);
+                await waitForPreviewDeploy(env, branch, emit, flags, record.baselineSha ?? null);
               }
             } else if (status === "ERROR") {
               emit("error", { message: "Agent run failed." });
@@ -388,22 +434,32 @@ function handleUpstreamSseEvent(
   }
 
   if (eventType === "thinking") {
+    const text = typeof payload.text === "string" ? payload.text : "";
+    if (text) {
+      emit("activity", { kind: "thinking", text, streamId: "thinking" });
+    }
     emit("step", { id: "think", label: "Planning changes", state: "running" });
     return;
   }
 
   if (eventType === "status") {
     const status = String(payload.status ?? "");
+    const explicitMessage =
+      typeof payload.message === "string" ? payload.message.trim() : "";
     const step = statusToStep(status);
     if (step && !seenStatus.has(status)) {
       seenStatus.add(status);
       emit("step", step);
+      if (explicitMessage) {
+        emit("activity", { kind: "status", text: explicitMessage, streamId: `status-${status}` });
+      }
       return;
     }
-    const message = runStatusMessage(status);
+    const message = explicitMessage || runStatusMessage(status);
     if (message && !seenStatus.has(status)) {
       seenStatus.add(status);
       emit("status", { message });
+      emit("activity", { kind: "status", text: message, streamId: `status-${status}` });
     }
     return;
   }
@@ -411,9 +467,16 @@ function handleUpstreamSseEvent(
   if (eventType === "tool_call") {
     const name = String(payload.name ?? "");
     const status = String(payload.status ?? "");
+    const callId = String(payload.callId ?? name);
     const step = toolCallToStep(name, status);
     if (step) {
       emit("step", step);
+      emit("activity", {
+        kind: "tool",
+        text: step.label,
+        streamId: `tool-${callId}`,
+        done: step.state === "done",
+      });
     }
     return;
   }
@@ -435,7 +498,7 @@ function handleUpstreamSseEvent(
     });
 
     if (isTerminalRunStatus(status) && status === "FINISHED" && branch) {
-      void maybeEmitPreview(env, branch, emit, flags);
+      void maybeEmitPreview(env, branch, emit, flags, record.baselineSha ?? null);
     }
     return;
   }
@@ -597,11 +660,14 @@ app.post("/api/agent/message", async (c) => {
       };
       await putSession(c.env.SESSIONS, session, cleanupTtlSeconds(c.env));
 
+      const baselineSha = await captureRunBaseline(c.env, branch);
+
       const runRecord: RunRecord = {
         runId: created.run.id,
         sessionId,
         agentId: created.agent.id,
         branch,
+        baselineSha,
         status: created.run.status,
         createdAt: Date.now(),
       };
@@ -612,6 +678,7 @@ app.post("/api/agent/message", async (c) => {
         agentId: created.agent.id,
         runId: created.run.id,
         branch,
+        baselineSha,
       });
     } catch (error) {
       const msg = error instanceof Error ? error.message : "agent_create_failed";
@@ -639,11 +706,14 @@ app.post("/api/agent/message", async (c) => {
       session.contributorName = contributorName;
       await putSession(c.env.SESSIONS, session, cleanupTtlSeconds(c.env));
 
+      const baselineSha = await captureRunBaseline(c.env, session.branch);
+
       await putRun(c.env.SESSIONS, {
         runId: created.run.id,
         sessionId: session.sessionId,
         agentId: created.agent.id,
         branch: session.branch,
+        baselineSha,
         status: created.run.status,
         createdAt: Date.now(),
       }, cleanupTtlSeconds(c.env));
@@ -653,8 +723,11 @@ app.post("/api/agent/message", async (c) => {
         agentId: created.agent.id,
         runId: created.run.id,
         branch: session.branch,
+        baselineSha,
       });
     }
+
+    const baselineSha = await captureRunBaseline(c.env, session.branch);
 
     const created = await createCloudRunWhenReady(
       c.env.CURSOR_API_KEY,
@@ -667,6 +740,7 @@ app.post("/api/agent/message", async (c) => {
       sessionId: session.sessionId,
       agentId: session.agentId,
       branch: session.branch,
+      baselineSha,
       status: created.run.status,
       createdAt: Date.now(),
     }, cleanupTtlSeconds(c.env));
@@ -682,16 +756,19 @@ app.post("/api/agent/message", async (c) => {
       agentId: session.agentId,
       runId: created.run.id,
       branch: session.branch,
+      baselineSha,
     });
   } catch (error) {
     if (session.agentId && isAgentBusyError(error)) {
       const active = await getActiveRun(c.env.CURSOR_API_KEY, session.agentId);
       if (active) {
+        const activeRecord = await getRun(c.env.SESSIONS, active.id);
         return c.json({
           sessionId: session.sessionId,
           agentId: session.agentId,
           runId: active.id,
           branch: session.branch,
+          baselineSha: activeRecord?.baselineSha ?? null,
           attachedToActiveRun: true,
         });
       }
@@ -704,11 +781,28 @@ app.post("/api/agent/message", async (c) => {
   }
 });
 
+app.get("/api/agent/draft", async (c) => {
+  const branch = c.req.query("branch")?.trim();
+  if (!branch) {
+    return jsonError("branch_required");
+  }
+
+  try {
+    const draft = await resolveBranchDraft(c.env, branch);
+    return c.json(draft);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "draft_resolve_failed";
+    return jsonError(message, 502);
+  }
+});
+
 app.get("/api/agent/preview", async (c) => {
   const branch = c.req.query("branch")?.trim();
   if (!branch) {
     return jsonError("branch_required");
   }
+
+  const baselineSha = c.req.query("baselineSha")?.trim() || null;
 
   try {
     const deployed = await checkBranchPreviewDeploy({
@@ -716,6 +810,7 @@ app.get("/api/agent/preview", async (c) => {
       projectName: c.env.PAGES_PROJECT_NAME || "popped-dev",
       repoUrl: c.env.GITHUB_REPO_URL,
       githubToken: c.env.GITHUB_TOKEN,
+      baselineSha,
     });
     return c.json({
       branch,
@@ -751,25 +846,45 @@ app.get("/api/agent/runs/:runId", async (c) => {
     let previewPhase: string | undefined;
 
     if (branch) {
-      const deployed = await previewDeployForBranch(c.env, branch, false);
-      previewUrl = deployed.previewUrl;
-      previewReady = deployed.ready;
-      previewSha = deployed.sha;
-      previewProgress = deployed.progress;
-      previewPhase = deployed.phase;
+      const baselineSha = record.baselineSha ?? null;
+      const heuristic = await previewUrlForBranch(c.env, branch);
 
-      if (terminal && run.status === "FINISHED" && !previewReady && c.env.GITHUB_TOKEN) {
-        const waited = await checkBranchPreviewDeploy({
+      if (terminal && run.status === "FINISHED") {
+        const deployed = await checkBranchPreviewDeploy({
           branch,
           projectName: c.env.PAGES_PROJECT_NAME || "popped-dev",
           repoUrl: c.env.GITHUB_REPO_URL,
           githubToken: c.env.GITHUB_TOKEN,
+          baselineSha,
         });
-        previewUrl = waited.previewUrl;
-        previewReady = waited.ready;
-        previewSha = waited.sha;
-        previewProgress = waited.progress;
-        previewPhase = waited.phase;
+        previewUrl = deployed.previewUrl;
+        previewReady = deployed.ready;
+        previewSha = deployed.sha;
+        previewProgress = deployed.progress;
+        previewPhase = deployed.phase;
+
+        if (!previewReady && c.env.GITHUB_TOKEN) {
+          const waited = await waitForBranchPreviewDeploy({
+            branch,
+            projectName: c.env.PAGES_PROJECT_NAME || "popped-dev",
+            repoUrl: c.env.GITHUB_REPO_URL,
+            githubToken: c.env.GITHUB_TOKEN,
+            baselineSha,
+            maxAttempts: 12,
+            intervalMs: 1500,
+          });
+          previewUrl = waited.previewUrl;
+          previewReady = waited.ready;
+          previewSha = waited.sha;
+          previewProgress = waited.progress;
+          previewPhase = waited.phase;
+        }
+      } else {
+        previewUrl = heuristic;
+        previewReady = false;
+        previewSha = baselineSha;
+        previewProgress = run.status === "RUNNING" ? 35 : 18;
+        previewPhase = "waiting_for_push";
       }
     }
 
@@ -844,7 +959,12 @@ app.get("/api/agent/runs/:runId/stream", async (c) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
-      const flags: PreviewFlags = { previewEmitted: false, previewReady: false, assistantSent: false };
+      const flags: PreviewFlags = {
+        previewEmitted: false,
+        previewReady: false,
+        assistantSent: false,
+        lastPreviewSha: null,
+      };
       const seenStatus = new Set<string>();
 
       try {
@@ -898,6 +1018,12 @@ app.get("/api/agent/runs/:runId/stream", async (c) => {
             flags,
           );
           if (isTerminalRunStatus(status)) {
+            if (status === "FINISHED") {
+              const branch = record.branch;
+              if (branch && !flags.previewReady) {
+                await waitForPreviewDeploy(c.env, branch, emit, flags, record.baselineSha ?? null);
+              }
+            }
             emit("done", {});
           }
         } catch (error) {

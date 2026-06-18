@@ -2,12 +2,14 @@
 
 import { DesignModeProvider } from "@/components/design/DesignModeContext";
 import { DesignChangesProvider } from "@/components/design/DesignChangesProvider";
+import { LiveDraftProvider } from "@/components/design/LiveDraftProvider";
 import { DesignModePreviewGuard } from "@/components/design/DesignModePreviewGuard";
 import { DesignSelectLayer } from "@/components/design/DesignSelectLayer";
 import { PreviewBar } from "@/components/design/PreviewBar";
 import { PreviewFrame } from "@/components/design/PreviewFrame";
 import { PreviewProvider, usePreview } from "@/components/design/PreviewContext";
 import { PreviewReviewModal } from "@/components/design/PreviewReviewModal";
+import { ChangeRunPanel } from "@/components/design/ChangeRunPanel";
 import { YourChangesTab } from "@/components/design/YourChangesTab";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ContributionAttributionLayer } from "@/components/community/ContributionAttributionLayer";
@@ -39,13 +41,16 @@ export function HomeShell() {
     <DesignModeProvider>
       <PreviewProvider>
         <DesignChangesProvider>
+          <LiveDraftProvider>
           <DesignModePreviewGuard />
           <SiteHeader />
           <HomeMain />
           <YourChangesTab />
+          <ChangeRunPanel />
           <DesignSelectLayer />
           <ContributionAttributionLayer />
           <PreviewReviewModal />
+          </LiveDraftProvider>
         </DesignChangesProvider>
       </PreviewProvider>
     </DesignModeProvider>

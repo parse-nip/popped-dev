@@ -31,6 +31,8 @@ export type RunRecord = {
   sessionId: string;
   agentId: string;
   branch?: string;
+  /** Branch head SHA when this run started — preview is ready only after a newer commit deploys. */
+  baselineSha?: string | null;
   prUrl?: string;
   mergeCommitUrl?: string;
   status?: string;

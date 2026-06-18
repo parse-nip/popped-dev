@@ -148,23 +148,34 @@ async function getPagesCheckStatus(
   return { previewUrl: null, deployed: false, sha, checkStatus: null, conclusion: null };
 }
 
+export async function getBranchHeadShaForBranch(options: {
+  branch: string;
+  repoUrl: string;
+  githubToken?: string;
+}): Promise<string | null> {
+  if (!options.githubToken) return null;
+  const { owner, repo } = parseRepoUrl(options.repoUrl);
+  return getBranchHeadSha(options.githubToken, owner, repo, options.branch);
+}
+
 /** One-shot deploy status for a branch (no long poll). */
 export async function checkBranchPreviewDeploy(options: {
   branch: string;
   projectName: string;
   repoUrl: string;
   githubToken?: string;
+  /** When set, preview is not ready until branch head moves past this commit. */
+  baselineSha?: string | null;
 }): Promise<BranchDeployStatus> {
   const heuristic = branchToPreviewUrlHeuristic(options.branch, options.projectName);
 
   if (!options.githubToken) {
-    const liveVerified = await isPreviewUrlLive(heuristic);
     return {
       previewUrl: heuristic,
-      ready: liveVerified,
+      ready: false,
       sha: null,
-      progress: liveVerified ? 100 : 35,
-      phase: liveVerified ? "live" : "building",
+      progress: 20,
+      phase: "building",
     };
   }
 
@@ -176,6 +187,16 @@ export async function checkBranchPreviewDeploy(options: {
       ready: false,
       sha: null,
       progress: 8,
+      phase: "waiting_for_push",
+    };
+  }
+
+  if (options.baselineSha && sha === options.baselineSha) {
+    return {
+      previewUrl: heuristic,
+      ready: false,
+      sha,
+      progress: 12,
       phase: "waiting_for_push",
     };
   }
@@ -202,6 +223,7 @@ export async function waitForBranchPreviewDeploy(options: {
   projectName: string;
   repoUrl: string;
   githubToken?: string;
+  baselineSha?: string | null;
   maxAttempts?: number;
   intervalMs?: number;
 }): Promise<BranchDeployStatus> {
@@ -210,13 +232,12 @@ export async function waitForBranchPreviewDeploy(options: {
   const heuristic = branchToPreviewUrlHeuristic(options.branch, options.projectName);
 
   if (!options.githubToken) {
-    const liveVerified = await isPreviewUrlLive(heuristic);
     return {
       previewUrl: heuristic,
-      ready: liveVerified,
+      ready: false,
       sha: null,
-      progress: liveVerified ? 100 : 35,
-      phase: liveVerified ? "live" : "building",
+      progress: 20,
+      phase: "building",
     };
   }
 
@@ -225,6 +246,11 @@ export async function waitForBranchPreviewDeploy(options: {
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const sha = await getBranchHeadSha(options.githubToken, owner, repo, options.branch);
     if (!sha) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      continue;
+    }
+
+    if (options.baselineSha && sha === options.baselineSha) {
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
       continue;
     }
@@ -259,14 +285,12 @@ export async function waitForBranchPreviewDeploy(options: {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 
-  const previewUrl = await resolvePagesPreviewUrl(options);
-  const liveVerified = await isPreviewUrlLive(previewUrl);
   return {
-    previewUrl,
-    ready: liveVerified,
+    previewUrl: heuristic,
+    ready: false,
     sha: null,
-    progress: liveVerified ? 100 : 55,
-    phase: liveVerified ? "live" : "building",
+    progress: 55,
+    phase: "building",
   };
 }
 

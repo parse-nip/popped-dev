@@ -237,6 +237,30 @@ export async function listChangedFilesOnBranch(
   return { aheadBy: comparison.aheadBy, changedFiles: comparison.changedFiles };
 }
 
+export async function getFileContentFromBranch(
+  token: string,
+  repoUrl: string,
+  branchName: string,
+  path: string,
+): Promise<{ content: string; sha: string } | null> {
+  const { owner, repo } = parseRepoUrl(repoUrl);
+  const response = await fetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branchName)}`,
+    { headers: githubHeaders(token) },
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const file = (await response.json()) as { content?: string; sha?: string };
+  if (!file.content || !file.sha) {
+    return null;
+  }
+
+  return { content: decodeBase64Utf8(file.content), sha: file.sha };
+}
+
 async function compareBranchToBase(
   token: string,
   repoUrl: string,

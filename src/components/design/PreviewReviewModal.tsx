@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { usePreview } from "@/components/design/PreviewContext";
+import { useDesignChanges } from "@/components/design/DesignChangesProvider";
 import { PreviewFrame } from "@/components/design/PreviewFrame";
 import { getContributorName, submitForReview } from "@/lib/agent-client";
 import { formatCooldownRemaining, MERGE_COOLDOWN_MS } from "@/lib/merge-cooldown";
@@ -28,6 +29,7 @@ export function PreviewReviewModal() {
     publishedUrl,
     setPublishedUrl,
   } = usePreview();
+  const { clearChanges } = useDesignChanges();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,6 +46,7 @@ export function PreviewReviewModal() {
       const result = await submitForReview({ runId, branch });
       if (result.mergeCommitUrl) {
         setPublishedUrl(result.mergeCommitUrl);
+        clearChanges();
       } else {
         setError("Merge did not return a commit link. Try again shortly.");
       }

@@ -1,4 +1,5 @@
 import { readContributorName } from "@/lib/contributor-name";
+import { clearDesignChanges } from "@/lib/design-changes-store";
 import {
   MERGE_COOLDOWN_MS,
   setLocalMergeCooldown,
@@ -53,6 +54,7 @@ export function getSessionId(): string {
 
 export function clearAgentSession(): void {
   if (typeof window === "undefined") return;
+  clearDesignChanges(getSessionId());
   sessionStorage.removeItem(SESSION_ID_KEY);
   sessionStorage.removeItem(AGENT_ID_KEY);
 }
@@ -89,10 +91,27 @@ export function storeAgentId(agentId: string): void {
 export type AgentStreamEvent =
   | { type: "assistant"; text: string }
   | { type: "status"; message: string }
+  | {
+      type: "activity";
+      kind: "thinking" | "tool" | "status";
+      text: string;
+      streamId?: string;
+      done?: boolean;
+    }
   | { type: "step"; id: string; label: string; state: "running" | "done" }
   | { type: "preview"; previewUrl: string; branch: string; ready?: boolean; sha?: string | null; progress?: number; phase?: string }
   | { type: "error"; message: string }
   | { type: "done" };
+
+export type BranchDraftPayload = {
+  branch: string;
+  sha: string | null;
+  css: string | null;
+  changedFiles: string[];
+  hasCssChanges: boolean;
+  hasTsxChanges: boolean;
+  ready: boolean;
+};
 
 export type RunStatusPayload = {
   runId: string;
@@ -142,13 +161,17 @@ async function pollRunUntilDone(
         ready: data.previewReady,
         sha: data.previewSha ?? null,
       });
-    } else if (data.previewUrl && data.branch && data.previewReady && !flags.previewReady) {
-      flags.previewReady = true;
+    } else if (
+      data.previewUrl &&
+      data.branch &&
+      (data.previewReady && !flags.previewReady || data.previewSha)
+    ) {
+      if (data.previewReady) flags.previewReady = true;
       onEvent({
         type: "preview",
         previewUrl: data.previewUrl,
         branch: data.branch,
-        ready: true,
+        ready: data.previewReady,
         sha: data.previewSha ?? null,
       });
     }
@@ -156,33 +179,24 @@ async function pollRunUntilDone(
     if (data.done) {
       if (data.status === "ERROR") {
         onEvent({ type: "error", message: "Agent run failed." });
-        onEvent({ type: "done" });
-        return;
       }
+      onEvent({ type: "done" });
+      return;
+    }
 
-      if (data.previewReady) {
-        onEvent({ type: "step", id: "deploy", label: "Preview ready", state: "done" });
-        onEvent({ type: "done" });
-        return;
-      }
-
-      onEvent({ type: "step", id: "deploy", label: "Building preview", state: "running" });
-    } else if (!data.done) {
-      const step =
-        data.status === "RUNNING"
-          ? { id: "work", label: "Working on your design", state: "running" as const }
-          : data.status === "CREATING"
-            ? { id: "start", label: "Starting agent", state: "running" as const }
-            : null;
-      if (step) {
-        onEvent({ type: "step", ...step });
-      }
+    const step =
+      data.status === "RUNNING"
+        ? { id: "work", label: "Working on your design", state: "running" as const }
+        : data.status === "CREATING"
+          ? { id: "start", label: "Starting agent", state: "running" as const }
+          : null;
+    if (step) {
+      onEvent({ type: "step", ...step });
     }
 
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
-  onEvent({ type: "error", message: "Preview deploy timed out — try View preview in a moment." });
   onEvent({ type: "done" });
 }
 
@@ -235,6 +249,7 @@ export async function sendAgentMessage(params: {
   runId: string;
   agentId: string;
   branch: string;
+  baselineSha?: string | null;
   attachedToActiveRun?: boolean;
 }> {
   const contributorName = getContributorName();
@@ -276,6 +291,7 @@ export async function sendAgentMessage(params: {
     runId: string;
     agentId: string;
     branch: string;
+    baselineSha?: string | null;
     attachedToActiveRun?: boolean;
   };
 
@@ -363,6 +379,28 @@ export function streamAgentRun(
     }
   });
 
+  source.addEventListener("activity", (event) => {
+    try {
+      const data = JSON.parse(event.data) as {
+        kind?: "thinking" | "tool" | "status";
+        text?: string;
+        streamId?: string;
+        done?: boolean;
+      };
+      if (data.text) {
+        onEvent({
+          type: "activity",
+          kind: data.kind ?? "status",
+          text: data.text,
+          streamId: data.streamId,
+          done: data.done,
+        });
+      }
+    } catch {
+      // ignore malformed events
+    }
+  });
+
   source.addEventListener("preview", (event) => {
     try {
       const data = JSON.parse(event.data) as {
@@ -425,10 +463,6 @@ export function streamAgentRun(
     if (flags.doneReceived) return;
     flags.doneReceived = true;
     onEvent({ type: "done" });
-    if (!flags.previewReady) {
-      maybePoll();
-      return;
-    }
     finish();
   });
 
@@ -436,10 +470,6 @@ export function streamAgentRun(
     if (flags.doneReceived) return;
     flags.doneReceived = true;
     onEvent({ type: "done" });
-    if (!flags.previewReady) {
-      maybePoll();
-      return;
-    }
     finish();
   });
 
@@ -493,6 +523,15 @@ export async function submitForReview(params: {
   };
 }
 
+export async function fetchBranchDraft(branch: string): Promise<BranchDraftPayload> {
+  const params = new URLSearchParams({ branch });
+  const response = await fetch(apiUrl(`/api/agent/draft?${params.toString()}`));
+  if (!response.ok) {
+    throw new Error("Could not fetch branch draft.");
+  }
+  return (await response.json()) as BranchDraftPayload;
+}
+
 export type PreviewDeployPhase =
   | "waiting_for_push"
   | "queued"
@@ -508,10 +547,15 @@ export type PreviewDeployStatus = {
   progress: number;
   phase: PreviewDeployPhase;
 };
-export async function fetchPreviewUrl(branch: string): Promise<PreviewDeployStatus> {
-  const response = await fetch(
-    apiUrl(`/api/agent/preview?branch=${encodeURIComponent(branch)}`),
-  );
+export async function fetchPreviewUrl(
+  branch: string,
+  baselineSha?: string | null,
+): Promise<PreviewDeployStatus> {
+  const params = new URLSearchParams({ branch });
+  if (baselineSha) {
+    params.set("baselineSha", baselineSha);
+  }
+  const response = await fetch(apiUrl(`/api/agent/preview?${params.toString()}`));
   if (!response.ok) {
     throw new Error("Could not resolve preview URL.");
   }

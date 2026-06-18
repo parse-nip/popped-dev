@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
+import { useDesignChanges } from "@/components/design/DesignChangesProvider";
 import { useDesignMode } from "@/components/design/DesignModeContext";
 import { usePreview } from "@/components/design/PreviewContext";
 import { formatCooldownRemaining } from "@/lib/merge-cooldown";
@@ -29,9 +30,11 @@ function DesignCursorIcon() {
 export function SiteHeader() {
   const { isDesignMode, toggleDesignMode } = useDesignMode();
   const { mode: previewMode } = usePreview();
+  const { isAgentBusy } = useDesignChanges();
   const { active: mergeCooldownActive, remainingMs } = useMergeCooldown();
   const designDisabled =
     previewMode === "preview" || isDraftPreviewEmbed() || mergeCooldownActive;
+  const designLockedOn = isAgentBusy && isDesignMode;
 
   return (
     <header className="site-header" data-design-select-ui>
@@ -53,6 +56,13 @@ export function SiteHeader() {
             {mergeCooldownActive
               ? `New design in ${formatCooldownRemaining(remainingMs)}`
               : "Review only"}
+          </span>
+        ) : designLockedOn ? (
+          <span
+            className="site-header-design-locked"
+            title="Design mode stays on while the agent is working"
+          >
+            Agent working…
           </span>
         ) : (
         <button

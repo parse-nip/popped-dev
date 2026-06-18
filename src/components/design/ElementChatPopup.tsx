@@ -7,8 +7,9 @@ import {
   type ActivityStep,
 } from "@/components/design/AgentActivityFeed";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
+import { useDesignChanges } from "@/components/design/DesignChangesProvider";
+import { useLiveDraft } from "@/components/design/LiveDraftProvider";
 import {
-  branchToPreviewUrl,
   sendAgentMessage,
   streamAgentRun,
   type AgentStreamEvent,
@@ -28,14 +29,6 @@ type ElementChatPopupProps = {
   elementContext: ElementContext;
   onClose: () => void;
   onSelectionLockChange?: (locked: boolean) => void;
-  onPreviewReady: (params: {
-    previewUrl: string;
-    branch: string;
-    runId: string;
-    agentId: string;
-    ready?: boolean;
-    sha?: string | null;
-  }) => void;
 };
 
 const POPUP_MIN_WIDTH = 360;
@@ -50,6 +43,7 @@ type RunMeta = {
   runId: string;
   agentId: string;
   branch: string;
+  baselineSha: string | null;
 };
 
 type PopupLayout = { left: number; top: number; width: number };
@@ -178,7 +172,6 @@ export function ElementChatPopup({
   elementContext,
   onClose,
   onSelectionLockChange,
-  onPreviewReady,
 }: ElementChatPopupProps) {
   const popupRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -188,13 +181,7 @@ export function ElementChatPopup({
   const streamCleanupRef = useRef<(() => void) | null>(null);
   const assistantBufferRef = useRef("");
   const runMetaRef = useRef<RunMeta | null>(null);
-  const previewOpenedRef = useRef(false);
-  const pendingPreviewRef = useRef<{
-    previewUrl: string;
-    branch: string;
-    sha?: string | null;
-    ready?: boolean;
-  } | null>(null);
+  const runFinishedRef = useRef(false);
   const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -210,12 +197,16 @@ export function ElementChatPopup({
   const [dictationError, setDictationError] = useState<string | null>(null);
   const [layout, setLayout] = useState<PopupLayout>(() => getPopupLayout(anchorRect));
   const [contributorName, setContributorName] = useState(readContributorName);
+  const { addChange, updateDeployStatus, claimStream, releaseStream, focusChange } =
+    useDesignChanges();
+  const { startLiveDraft, showConfirm } = useLiveDraft();
   const hasThread =
     phase === "running" ||
     (phase === "complete" && (messages.length > 0 || activitySteps.length > 0));
   const assistantSummary = messages.findLast((message) => message.role === "assistant")?.content;
+  const activityMessages = messages.filter((message) => message.role === "status");
   const needsName = contributorName.trim().length < 2;
-  const isLocked = phase === "running" || phase === "complete";
+  const isLocked = phase === "running" || (phase === "complete" && showConfirm);
 
   useEffect(() => subscribeContributorName(setContributorName), []);
 
@@ -257,70 +248,72 @@ export function ElementChatPopup({
     });
   }, []);
 
-  const openPreview = useCallback(
-    (previewUrl?: string, options?: { ready?: boolean; sha?: string | null }) => {
-      const meta = runMetaRef.current;
-      if (!meta) return;
-
-      const pending = pendingPreviewRef.current;
-      const resolvedUrl = previewUrl ?? pending?.previewUrl ?? branchToPreviewUrl(meta.branch);
-      const ready = options?.ready ?? pending?.ready ?? false;
-
-      if (previewOpenedRef.current && !ready) return;
-      if (previewOpenedRef.current && ready) {
-        onPreviewReady({
-          previewUrl: resolvedUrl,
-          branch: meta.branch,
-          runId: meta.runId,
-          agentId: meta.agentId,
-          ready: true,
-          sha: options?.sha ?? pending?.sha ?? null,
-        });
-        return;
-      }
-
-      previewOpenedRef.current = true;
-      onPreviewReady({
-        previewUrl: resolvedUrl,
-        branch: meta.branch,
-        runId: meta.runId,
-        agentId: meta.agentId,
-        ready,
-        sha: options?.sha ?? pending?.sha ?? null,
+  const appendActivityMessage = useCallback(
+    (text: string, streamId?: string, replace = false) => {
+      setMessages((prev) => {
+        if (streamId) {
+          const index = prev.findIndex((message) => message.id === streamId);
+          if (index >= 0) {
+            const existing = prev[index];
+            const content = replace ? text : `${existing.content}${text}`;
+            return [...prev.slice(0, index), { ...existing, content }, ...prev.slice(index + 1)];
+          }
+          return [...prev, { id: streamId, role: "status", content: text }];
+        }
+        return [...prev, { id: crypto.randomUUID(), role: "status", content: text }];
       });
     },
-    [onPreviewReady],
+    [],
   );
+
+  useEffect(() => {
+    if (!showConfirm) return;
+    const runId = runMetaRef.current?.runId;
+    if (runId) {
+      updateDeployStatus(runId, "ready");
+      pushActivityStep({ id: "draft", label: "Styles applied — confirm below", state: "done" });
+    }
+  }, [showConfirm, updateDeployStatus, pushActivityStep]);
 
   const finishRun = useCallback(() => {
     setIsThinking(false);
-    if (pendingPreviewRef.current?.ready === true) {
-      setPhase("complete");
-      pushActivityStep({ id: "deploy", label: "Preview ready", state: "done" });
-    }
-    const pending = pendingPreviewRef.current;
-    if (pending) {
-      openPreview(pending.previewUrl, { ready: pending.ready, sha: pending.sha });
-    } else {
-      openPreview();
-    }
-  }, [openPreview, pushActivityStep]);
+    setPhase("complete");
+    pushActivityStep({ id: "done", label: "Agent finished", state: "done" });
+  }, [pushActivityStep]);
 
   const handleStreamEvent = useCallback(
     (event: AgentStreamEvent) => {
+      const runId = runMetaRef.current?.runId;
+
       if (event.type === "assistant") {
         assistantBufferRef.current += event.text;
         updateAssistantMessage(assistantBufferRef.current);
         pushActivityStep({ id: "connect", label: "Connected to agent", state: "done" });
+        if (runId) updateDeployStatus(runId, "working");
         return;
       }
 
       if (event.type === "step") {
         pushActivityStep(event);
+        if (runId && (event.id === "start" || event.id === "work" || event.id === "think")) {
+          updateDeployStatus(runId, "working");
+        }
+        return;
+      }
+
+      if (event.type === "activity") {
+        if (event.kind === "thinking") {
+          appendActivityMessage(event.text, event.streamId ?? "thinking");
+        } else if (event.kind === "tool") {
+          appendActivityMessage(event.text, event.streamId, true);
+        } else {
+          appendActivityMessage(event.text, event.streamId, true);
+        }
         return;
       }
 
       if (event.type === "status") {
+        appendActivityMessage(event.message, `status-${event.message.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24)}`, true);
         pushActivityStep({
           id: `status-${event.message.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24)}`,
           label: event.message.replace(/…$/, ""),
@@ -330,20 +323,6 @@ export function ElementChatPopup({
       }
 
       if (event.type === "preview") {
-        pendingPreviewRef.current = {
-          previewUrl: event.previewUrl,
-          branch: event.branch,
-          sha: event.sha ?? null,
-          ready: event.ready,
-        };
-        openPreview(event.previewUrl, { ready: event.ready, sha: event.sha ?? null });
-        if (event.ready === true) {
-          setPhase("complete");
-          setIsThinking(false);
-          pushActivityStep({ id: "deploy", label: "Preview ready", state: "done" });
-        } else {
-          pushActivityStep({ id: "deploy", label: "Building preview", state: "running" });
-        }
         return;
       }
 
@@ -356,6 +335,8 @@ export function ElementChatPopup({
           pushActivityStep({ id: "busy", label: "Agent finishing previous step", state: "running" });
           return;
         }
+        if (runId) updateDeployStatus(runId, "failed");
+        if (runId) releaseStream(runId);
         setActivityError(event.message);
         pushActivityStep({ id: "error", label: "Something went wrong", state: "done" });
         setPhase("complete");
@@ -364,10 +345,20 @@ export function ElementChatPopup({
       }
 
       if (event.type === "done") {
+        runFinishedRef.current = true;
+        if (runId) releaseStream(runId);
         finishRun();
       }
     },
-    [finishRun, openPreview, pushActivityStep, updateAssistantMessage],
+    [
+      appendActivityMessage,
+      finishRun,
+      focusChange,
+      pushActivityStep,
+      releaseStream,
+      updateAssistantMessage,
+      updateDeployStatus,
+    ],
   );
 
   const stopDictation = useCallback(() => {
@@ -497,6 +488,7 @@ export function ElementChatPopup({
     setActivitySteps([]);
     setActivityError(null);
     assistantBufferRef.current = "";
+    runFinishedRef.current = false;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -512,7 +504,7 @@ export function ElementChatPopup({
     pushActivityStep({ id: "send", label: "Sending to agent", state: "running" });
 
     try {
-      const { runId, agentId, branch, attachedToActiveRun } = await sendAgentMessage({
+      const { runId, agentId, branch, baselineSha, attachedToActiveRun } = await sendAgentMessage({
         message: trimmed,
         elementContext,
       });
@@ -524,9 +516,21 @@ export function ElementChatPopup({
         pushActivityStep({ id: "start", label: "Starting agent", state: "running" });
       }
 
-      runMetaRef.current = { runId, agentId, branch };
-      pendingPreviewRef.current = null;
-      previewOpenedRef.current = false;
+      runMetaRef.current = { runId, agentId, branch, baselineSha: baselineSha ?? null };
+      runFinishedRef.current = false;
+      claimStream(runId);
+      focusChange(runId);
+
+      addChange({
+        runId,
+        agentId,
+        branch,
+        prompt: trimmed,
+        elementLabel,
+        baselineSha: baselineSha ?? null,
+      });
+
+      startLiveDraft({ runId, agentId, branch });
 
       streamCleanupRef.current = streamAgentRun(runId, agentId, handleStreamEvent);
     } catch (error) {
@@ -681,13 +685,7 @@ export function ElementChatPopup({
             </svg>
           </button>
         ) : phase === "complete" ? (
-          <button
-            type="button"
-            className="element-chat-popup-view-preview"
-            onClick={() => openPreview()}
-          >
-            View preview
-          </button>
+          <span className="element-chat-popup-locked-hint">Confirm below</span>
         ) : (
           <span className="element-chat-popup-toolbar-spacer" aria-hidden="true" />
         )}
@@ -695,6 +693,14 @@ export function ElementChatPopup({
 
       {hasThread ? (
         <div className="element-chat-popup-thread">
+          {activityMessages.map((message) => (
+            <p
+              key={message.id}
+              className="element-chat-popup-line element-chat-popup-line--status"
+            >
+              {message.content}
+            </p>
+          ))}
           {assistantSummary ? (
             <p className="element-chat-popup-line element-chat-popup-line--assistant">
               {assistantSummary}

@@ -16,6 +16,7 @@ type PreviewContextValue = {
   mode: PreviewMode;
   previewUrl: string | null;
   previewRevision: string | null;
+  previewBaselineSha: string | null;
   previewDeployReady: boolean;
   branch: string | null;
   runId: string | null;
@@ -29,6 +30,7 @@ type PreviewContextValue = {
     agentId: string;
     ready?: boolean;
     sha?: string | null;
+    baselineSha?: string | null;
   }) => void;
   updatePreviewUrl: (previewUrl: string, revision?: string | null) => void;
   backToLive: () => void;
@@ -43,6 +45,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<PreviewMode>("live");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewRevision, setPreviewRevision] = useState<string | null>(null);
+  const [previewBaselineSha, setPreviewBaselineSha] = useState<string | null>(null);
   const [previewDeployReady, setPreviewDeployReady] = useState(false);
   const [branch, setBranch] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
@@ -58,16 +61,18 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
       agentId: string;
       ready?: boolean;
       sha?: string | null;
+      baselineSha?: string | null;
     }) => {
       setBranch(params.branch);
       setRunId(params.runId);
       setAgentId(params.agentId);
       setMode("preview");
       setPreviewUrl(params.previewUrl);
-      setPreviewRevision(params.sha ?? null);
+      if (params.sha) setPreviewRevision(params.sha);
+      setPreviewBaselineSha(params.baselineSha ?? null);
       setPreviewDeployReady(params.ready === true);
 
-      void fetchPreviewUrl(params.branch)
+      void fetchPreviewUrl(params.branch, params.baselineSha ?? null)
         .then((resolved) => {
           setPreviewUrl(resolved.previewUrl);
           if (resolved.sha) setPreviewRevision(resolved.sha);
@@ -90,6 +95,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
     setReviewOpen(false);
     setPreviewDeployReady(false);
     setPreviewRevision(null);
+    setPreviewBaselineSha(null);
   }, []);
 
   const openReview = useCallback(() => {
@@ -105,6 +111,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
       mode,
       previewUrl,
       previewRevision,
+      previewBaselineSha,
       previewDeployReady,
       branch,
       runId,
@@ -122,6 +129,7 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
       mode,
       previewUrl,
       previewRevision,
+      previewBaselineSha,
       previewDeployReady,
       branch,
       runId,
