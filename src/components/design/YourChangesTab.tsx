@@ -15,7 +15,7 @@ export function YourChangesTab() {
     publishStatus,
     publishError,
     commitUrl,
-    isReady,
+    showLivePreview,
   } = useDesignWorkspace();
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -113,7 +113,7 @@ export function YourChangesTab() {
         <div className="your-changes-actions">
           <Button
             type="button"
-            disabled={!isReady || changes.length === 0 || publishStatus === "publishing"}
+            disabled={!showLivePreview || changes.length === 0 || publishStatus === "publishing"}
             onClick={() => void handlePublish()}
           >
             {publishStatus === "publishing" ? "Publishing…" : "Publish to GitHub"}

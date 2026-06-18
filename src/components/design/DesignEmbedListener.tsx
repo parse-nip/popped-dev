@@ -49,6 +49,10 @@ export function DesignEmbedListener() {
 
     document.body.dataset.designEmbed = "1";
 
+    if (window.parent !== window) {
+      window.parent.postMessage({ source: DESIGN_EMBED_SOURCE, type: "ready" }, "*");
+    }
+
     function handleMouseMove(event: MouseEvent) {
       const element = getSelectableElement(event.target);
       if (!element) {

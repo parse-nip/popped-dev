@@ -182,7 +182,7 @@ export function ElementChatPopup({
   const [layout, setLayout] = useState<PopupLayout>(() => getPopupLayout(anchorRect));
   const [contributorName, setContributorName] = useState(readContributorName);
   const setAgentBusy = useSetAgentBusy();
-  const { isReady, runAgentEdit } = useDesignWorkspace();
+  const { showLivePreview, runAgentEdit } = useDesignWorkspace();
   const showConfirm = false;
   const hasThread =
     phase === "running" ||
@@ -379,8 +379,8 @@ export function ElementChatPopup({
     const trimmed = input.trim();
     if (!trimmed || isThinking) return;
 
-    if (!isReady) {
-      setActivityError("Live preview is still loading — wait a moment and try again.");
+    if (!showLivePreview) {
+      setActivityError("Still preparing — the page will update in a moment.");
       return;
     }
 

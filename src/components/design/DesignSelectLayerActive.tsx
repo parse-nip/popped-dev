@@ -61,8 +61,8 @@ function embedContextToElementContext(context: DesignEmbedElementContext): Eleme
 }
 
 export function DesignSelectLayerActive() {
-  const { isReady, embedPreviewUrl } = useDesignWorkspace();
-  const useIframeSelection = isReady && Boolean(embedPreviewUrl);
+  const { showLivePreview, embedPreviewUrl } = useDesignWorkspace();
+  const useIframeSelection = showLivePreview && Boolean(embedPreviewUrl);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const [hover, setHover] = useState<HoverState | null>(null);
@@ -176,6 +176,8 @@ export function DesignSelectLayerActive() {
         }
         return;
       }
+
+      if (event.data.type === "ready") return;
 
       const context = embedContextToElementContext(event.data.context);
       const rect = offsetEmbedRect(iframe, event.data.rect);

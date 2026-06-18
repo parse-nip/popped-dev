@@ -7,8 +7,8 @@ import { isDraftPreviewEmbed } from "@/lib/draft-preview";
 
 export function DesignSelectLayer() {
   const { isDesignMode } = useDesignMode();
-  const { isReady } = useDesignWorkspace();
-  if (!isDesignMode || !isReady || isDraftPreviewEmbed()) {
+  const { showLivePreview, embedPreviewUrl } = useDesignWorkspace();
+  if (!isDesignMode || !showLivePreview || isDraftPreviewEmbed()) {
     return null;
   }
   return <DesignSelectLayerActive />;

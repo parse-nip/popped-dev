@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useDesignMode } from "@/components/design/DesignModeContext";
+import { isDesignEmbedMessage } from "@shared/design-embed-messages";
 import {
   fetchProjectFiles,
   pollDeployStatus,
@@ -40,6 +41,8 @@ type DesignWorkspaceContextValue = {
   embedPreviewUrl: string | null;
   isReady: boolean;
   isBooting: boolean;
+  /** Live iframe is loaded and the app inside sent a ready signal. */
+  showLivePreview: boolean;
   changes: FileChange[];
   editEvents: EditEvent[];
   baseSha: string | null;
@@ -49,6 +52,7 @@ type DesignWorkspaceContextValue = {
   runAgentEdit: (prompt: string, elementContext: ElementContext) => Promise<string>;
   publish: () => Promise<void>;
   refreshChanges: () => Promise<void>;
+  onPreviewFrameLoad: () => void;
 };
 
 const DesignWorkspaceContext = createContext<DesignWorkspaceContextValue | null>(null);
@@ -58,10 +62,12 @@ function stripAnsi(text: string): string {
 }
 
 export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
-  const { isDesignMode } = useDesignMode();
+  const { isDesignMode, setMode } = useDesignMode();
   const [status, setStatus] = useState<DesignWorkspaceStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFrameLoaded, setPreviewFrameLoaded] = useState(false);
+  const [previewAppReady, setPreviewAppReady] = useState(false);
   const [changes, setChanges] = useState<FileChange[]>([]);
   const [editEvents, setEditEvents] = useState<EditEvent[]>([]);
   const [baseSha, setBaseSha] = useState<string | null>(null);
@@ -74,12 +80,10 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
   const containerRef = useRef<WebContainer | null>(null);
   const originalFilesRef = useRef<Record<string, string>>({});
   const bootPromiseRef = useRef<Promise<void> | null>(null);
+  const devLogRef = useRef("");
 
   const appendLog = useCallback((chunk: string) => {
-    const cleaned = stripAnsi(chunk);
-    if (/error|failed|warn/i.test(cleaned)) {
-      // surfaced via status panel if needed
-    }
+    devLogRef.current += stripAnsi(chunk);
   }, []);
 
   const refreshChanges = useCallback(async () => {
@@ -94,6 +98,11 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const resetPreviewSignals = useCallback(() => {
+    setPreviewFrameLoaded(false);
+    setPreviewAppReady(false);
+  }, []);
+
   const boot = useCallback(async () => {
     if (containerRef.current && previewUrl) return;
     if (bootPromiseRef.current) return bootPromiseRef.current;
@@ -101,13 +110,12 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
     bootPromiseRef.current = (async () => {
       try {
         if (!isCrossOriginIsolated()) {
-          throw new Error(
-            "Design mode needs cross-origin isolation. Hard-refresh the page after deploy.",
-          );
+          throw new Error("Design mode is unavailable in this browser context.");
         }
 
         setStatus("booting");
         setError(null);
+        resetPreviewSignals();
 
         const container = await bootWebContainer();
         containerRef.current = container;
@@ -130,25 +138,51 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
         setStatus("ready");
       } catch (bootError) {
         const message =
-          bootError instanceof Error ? bootError.message : "Could not start design workspace.";
+          bootError instanceof Error ? bootError.message : "Design mode unavailable.";
         setError(message);
         setStatus("build_error");
+        setMode("browse");
       }
     })();
 
     return bootPromiseRef.current;
-  }, [appendLog, previewUrl]);
+  }, [appendLog, previewUrl, resetPreviewSignals, setMode]);
 
   useEffect(() => {
     if (isDesignMode) {
       void boot();
+      return;
     }
-  }, [isDesignMode, boot]);
+    resetPreviewSignals();
+  }, [isDesignMode, boot, resetPreviewSignals]);
+
+  useEffect(() => {
+    if (!previewUrl) return;
+
+    function handleMessage(event: MessageEvent) {
+      if (!isDesignEmbedMessage(event.data) || event.data.type !== "ready") return;
+      setPreviewAppReady(true);
+    }
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, [previewUrl]);
+
+  // If the embed ready ping is missed, still crossfade after the frame loads.
+  useEffect(() => {
+    if (!previewFrameLoaded || previewAppReady) return;
+    const timeout = window.setTimeout(() => setPreviewAppReady(true), 8000);
+    return () => window.clearTimeout(timeout);
+  }, [previewFrameLoaded, previewAppReady]);
+
+  const onPreviewFrameLoad = useCallback(() => {
+    setPreviewFrameLoaded(true);
+  }, []);
 
   const runAgentEdit = useCallback(
     async (prompt: string, elementContext: ElementContext): Promise<string> => {
       const container = containerRef.current;
-      if (!container) throw new Error("Workspace is still loading.");
+      if (!container) throw new Error("Still preparing design mode.");
 
       setStatus("agent_editing");
       setError(null);
@@ -201,7 +235,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
 
   const publish = useCallback(async () => {
     const container = containerRef.current;
-    if (!container || !baseSha) throw new Error("Workspace not ready.");
+    if (!container || !baseSha) throw new Error("Design mode not ready.");
 
     setPublishStatus("publishing");
     setPublishError(null);
@@ -251,10 +285,10 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
 
   const isReady = status === "ready" || status === "ready_to_publish" || status === "published";
   const isBooting =
-    isDesignMode &&
-    !isReady &&
-    status !== "build_error" &&
-    status !== "idle";
+    isDesignMode && !isReady && status !== "build_error" && status !== "idle";
+
+  const showLivePreview =
+    isDesignMode && isReady && previewFrameLoaded && previewAppReady && Boolean(embedPreviewUrl);
 
   const value = useMemo(
     () => ({
@@ -264,6 +298,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       embedPreviewUrl,
       isReady,
       isBooting,
+      showLivePreview,
       changes,
       editEvents,
       baseSha,
@@ -273,6 +308,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       runAgentEdit,
       publish,
       refreshChanges,
+      onPreviewFrameLoad,
     }),
     [
       status,
@@ -281,6 +317,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       embedPreviewUrl,
       isReady,
       isBooting,
+      showLivePreview,
       changes,
       editEvents,
       baseSha,
@@ -290,6 +327,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       runAgentEdit,
       publish,
       refreshChanges,
+      onPreviewFrameLoad,
     ],
   );
 
@@ -304,8 +342,4 @@ export function useDesignWorkspace() {
     throw new Error("useDesignWorkspace must be used within DesignWorkspaceProvider");
   }
   return context;
-}
-
-export function useOptionalDesignWorkspace() {
-  return useContext(DesignWorkspaceContext);
 }

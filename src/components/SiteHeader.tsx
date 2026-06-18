@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
 import { useDesignChanges } from "@/components/design/DesignChangesProvider";
 import { useDesignMode } from "@/components/design/DesignModeContext";
+import { useDesignWorkspace } from "@/components/design/DesignWorkspaceProvider";
 import { formatCooldownRemaining } from "@/lib/merge-cooldown";
 import { useMergeCooldown } from "@/lib/use-merge-cooldown";
 import { isDraftPreviewEmbed } from "@/lib/draft-preview";
@@ -29,6 +30,7 @@ function DesignCursorIcon() {
 export function SiteHeader() {
   const { isDesignMode, toggleDesignMode } = useDesignMode();
   const { isAgentBusy } = useDesignChanges();
+  const { isBooting } = useDesignWorkspace();
   const { active: mergeCooldownActive, remainingMs } = useMergeCooldown();
   const designDisabled = isDraftPreviewEmbed() || mergeCooldownActive;
   const designLockedOn = isAgentBusy && isDesignMode;
@@ -74,7 +76,7 @@ export function SiteHeader() {
           aria-label="Design mode"
           className={
             isDesignMode
-              ? "site-header-design-switch site-header-design-switch--on"
+              ? `site-header-design-switch site-header-design-switch--on${isBooting ? " site-header-design-switch--loading" : ""}`
               : "site-header-design-switch"
           }
           onClick={toggleDesignMode}

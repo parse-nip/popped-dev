@@ -26,6 +26,7 @@ export type DesignEmbedElementContext = {
 };
 
 export type DesignEmbedMessage =
+  | { source: typeof DESIGN_EMBED_SOURCE; type: "ready" }
   | { source: typeof DESIGN_EMBED_SOURCE; type: "hover"; rect: DesignEmbedRect; context: DesignEmbedElementContext }
   | { source: typeof DESIGN_EMBED_SOURCE; type: "select"; rect: DesignEmbedRect; context: DesignEmbedElementContext }
   | { source: typeof DESIGN_EMBED_SOURCE; type: "clear" };
@@ -34,7 +35,7 @@ export function isDesignEmbedMessage(data: unknown): data is DesignEmbedMessage 
   if (!data || typeof data !== "object") return false;
   const msg = data as Record<string, unknown>;
   if (msg.source !== DESIGN_EMBED_SOURCE) return false;
-  if (msg.type === "clear") return true;
+  if (msg.type === "clear" || msg.type === "ready") return true;
   if (msg.type !== "hover" && msg.type !== "select") return false;
   return Boolean(msg.rect && msg.context);
 }
