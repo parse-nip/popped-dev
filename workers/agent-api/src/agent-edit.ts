@@ -18,10 +18,12 @@ import { requireApprovedDesignRequest } from "./approve-design-request";
 import { resolveWebAssets } from "./fetch-web-asset";
 import {
   openRouterChat,
+  openRouterChatStream,
   resolveOpenRouterModel,
   type ChatMessage,
   type OpenRouterChatResult,
 } from "./openrouter";
+import { sanitizeAgentThoughtText } from "../../../shared/agent-thought-display";
 
 export type AgentEditInput = {
   prompt: string;
@@ -216,6 +218,9 @@ function sanitizeAgentEditResult(
 
 function openRouterErrorMessage(result: OpenRouterChatResult): string {
   if (!result.error) return "OpenRouter did not return an edit.";
+  if (/network|connection|abort|timeout|fetch failed/i.test(result.error)) {
+    return "Connection to the AI was interrupted — try again. If it keeps failing, the request may be too large.";
+  }
   if (result.status === 402 || /credits|afford|402/.test(result.error)) {
     return "OpenRouter is out of credits on this API key — add credits at openrouter.ai/settings/keys or raise the key's daily limit.";
   }
@@ -226,11 +231,47 @@ async function callDesignLlm(
   env: Env,
   messages: ChatMessage[],
   maxTokens = 32_768,
+  emit?: AgentEditStreamEmit,
 ): Promise<OpenRouterChatResult> {
-  return openRouterChat(env, messages, {
+  let thoughtBuffer = "";
+  let lastEmitAt = 0;
+
+  const onDelta = (delta: string) => {
+    thoughtBuffer += delta;
+    const now = Date.now();
+    if (now - lastEmitAt < 120) return;
+
+    const readable = sanitizeAgentThoughtText(thoughtBuffer);
+    if (readable.length < 8) return;
+
+    lastEmitAt = now;
+    emit?.("activity", {
+      kind: "thinking",
+      text: readable,
+      streamId: "thinking",
+      done: false,
+    });
+  };
+
+  const result = await openRouterChatStream(env, messages, {
     maxTokens,
     temperature: 0.15,
+    onDelta: emit ? onDelta : undefined,
   });
+
+  if (emit && thoughtBuffer) {
+    const readable = sanitizeAgentThoughtText(thoughtBuffer);
+    if (readable.length >= 3) {
+      emit("activity", {
+        kind: "thinking",
+        text: readable,
+        streamId: "thinking",
+        done: true,
+      });
+    }
+  }
+
+  return result;
 }
 
 async function runLlmEditPass(
@@ -258,6 +299,7 @@ async function runLlmEditPass(
       env,
       messages,
       options.strict ? 32_768 : 24_576,
+      emit,
     );
 
     if (hasOpenRouter && !aiResult.text) {

@@ -24,6 +24,7 @@ import {
 } from "@/lib/design-workspace-client";
 import type { ElementContext } from "@/lib/element-context";
 import type { DesignWorkspaceStatus, EditEvent, FileChange, StatusBarTone, AgentEditResponse } from "@/design/types";
+import { summarizeAgentThought } from "@shared/agent-thought-display";
 import { waitForCompileResult } from "@/design/compile-errors";
 import { DESIGN_FIX_MAX_ATTEMPTS } from "@shared/design-fix-loop";
 import {
@@ -61,6 +62,9 @@ type DesignWorkspaceContextValue = {
   /** Live snippet streamed while the agent is working. */
   statusDetail: string | null;
   statusBarTone: StatusBarTone;
+  /** Full streamed agent thought text while generating. */
+  agentThought: string | null;
+  isAgentThinking: boolean;
   runAgentEdit: (prompt: string, elementContext: ElementContext) => Promise<string>;
   publish: () => Promise<void>;
   refreshChanges: () => Promise<void>;
@@ -139,6 +143,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
   const [statusBarTone, setStatusBarTone] = useState<StatusBarTone>("default");
+  const [agentThought, setAgentThought] = useState<string | null>(null);
+  const [isAgentThinking, setIsAgentThinking] = useState(false);
   const [previewLive, setPreviewLive] = useState(false);
   const [previewRevision, setPreviewRevision] = useState(0);
 
@@ -340,6 +346,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       setStatusDetail("Checking your idea…");
       setStatusBarTone("approving");
       setProgressPercent(null);
+      setAgentThought(null);
+      setIsAgentThinking(true);
 
       const allFiles = await listTrackedFiles(container);
       const contextFiles = pickContextFiles(allFiles, elementContext.suggestedFiles);
@@ -355,8 +363,20 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       const editHandlers = {
         onStatus: (message: string) => {
           setStatusDetail(message);
-          if (/agent is working/i.test(message)) {
+          if (/agent is working|planning|building/i.test(message)) {
             setStatusBarTone("default");
+          }
+        },
+        onActivity: (activity: {
+          kind: "thinking" | "tool" | "status";
+          text: string;
+          done?: boolean;
+        }) => {
+          if (activity.kind !== "thinking") return;
+          setAgentThought(activity.text);
+          const teaser = summarizeAgentThought(activity.text);
+          if (teaser) {
+            setStatusDetail(teaser);
           }
         },
         onApproved: (reason: string) => {
@@ -389,12 +409,17 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
         setStatus("edit_rejected");
         setStatusBarTone("rejected");
         setStatusDetail(null);
+        setAgentThought(null);
+        setIsAgentThinking(false);
         throw editError;
       }
 
       if (!result.writes?.length) {
         throw new Error("Agent returned no file changes.");
       }
+
+      setAgentThought(null);
+      setIsAgentThinking(false);
 
       const preEditSnapshot = await snapshotFilePaths(
         container,
@@ -484,6 +509,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
           setStatus("agent_editing");
           setStatusBarTone("default");
           setStatusDetail(`Fixing build error (${fixAttempt}/${DESIGN_FIX_MAX_ATTEMPTS})…`);
+          setAgentThought(null);
+          setIsAgentThinking(true);
 
           const fixFiles = pickContextFiles(
             await listTrackedFiles(container),
@@ -504,6 +531,13 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
             },
             {
               onStatus: (message) => setStatusDetail(message),
+              onActivity: (activity) => {
+                if (activity.kind === "thinking") {
+                  setAgentThought(activity.text);
+                  const teaser = summarizeAgentThought(activity.text);
+                  if (teaser) setStatusDetail(teaser);
+                }
+              },
             },
           );
 
@@ -512,6 +546,9 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
             bumpPreview();
             throw new Error("Agent could not produce a fix for the build error.");
           }
+
+          setAgentThought(null);
+          setIsAgentThinking(false);
         }
 
         let wiringWarning: string | null = null;
@@ -520,6 +557,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
 
         if (unwired.length > 0) {
           setStatus("agent_editing");
+          setIsAgentThinking(true);
+          setAgentThought(null);
           setStatusDetail(
             `Connecting ${unwired.map((path) => path.split("/").pop()).join(", ")} to the page…`,
           );
@@ -536,6 +575,13 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
             },
             {
               onStatus: (message) => setStatusDetail(message),
+              onActivity: (activity) => {
+                if (activity.kind === "thinking") {
+                  setAgentThought(activity.text);
+                  const teaser = summarizeAgentThought(activity.text);
+                  if (teaser) setStatusDetail(teaser);
+                }
+              },
             },
           );
 
@@ -592,6 +638,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
         ]);
 
         setStatusDetail(wiringWarning);
+        setAgentThought(null);
+        setIsAgentThinking(false);
         await refreshChanges();
         setStatus("ready_to_publish");
         return wiringWarning ? `${result.summary} — ${wiringWarning}` : result.summary;
@@ -602,6 +650,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
         setStatus("build_error");
         setStatusBarTone("default");
         setStatusDetail(null);
+        setAgentThought(null);
+        setIsAgentThinking(false);
         throw applyError;
       }
     },
@@ -718,6 +768,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       progressPercent,
       statusDetail,
       statusBarTone,
+      agentThought,
+      isAgentThinking,
       runAgentEdit,
       publish,
       refreshChanges,
@@ -740,6 +792,8 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       progressPercent,
       statusDetail,
       statusBarTone,
+      agentThought,
+      isAgentThinking,
       runAgentEdit,
       publish,
       refreshChanges,
