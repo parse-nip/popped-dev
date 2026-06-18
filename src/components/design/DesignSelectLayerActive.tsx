@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useDesignMode } from "@/components/design/DesignModeContext";
 import { usePreview } from "@/components/design/PreviewContext";
 import { ElementChatPopup } from "@/components/design/ElementChatPopup";
 import { buildElementContext } from "@/lib/element-context";
@@ -41,18 +42,22 @@ function rectFromElement(element: Element, inset: number): Rect {
 
 export function DesignSelectLayerActive() {
   const { showPreview } = usePreview();
+  const { setMode: setDesignMode } = useDesignMode();
   const [hover, setHover] = useState<HoverState | null>(null);
   const [chat, setChat] = useState<ChatState | null>(null);
   const [highlight, setHighlight] = useState<Rect | null>(null);
+  const [selectionLocked, setSelectionLocked] = useState(false);
 
   const handlePreviewReady = useCallback(
     (params: Parameters<typeof showPreview>[0]) => {
       showPreview(params);
+      setDesignMode("browse");
       setChat(null);
       setHover(null);
       setHighlight(null);
+      window.scrollTo({ top: 0, behavior: "instant" });
     },
-    [showPreview],
+    [setDesignMode, showPreview],
   );
 
   useEffect(() => {
@@ -117,17 +122,27 @@ export function DesignSelectLayerActive() {
 
   useEffect(() => {
     function handleMouseMove(event: MouseEvent) {
-      if (chat) return;
+      if (chat || selectionLocked) return;
       updateHover(event.target);
     }
 
     function handleMouseLeave() {
-      if (!chat) {
+      if (!chat && !selectionLocked) {
         setHover(null);
       }
     }
 
     function handleClick(event: MouseEvent) {
+      if (selectionLocked) {
+        const target = event.target;
+        if (target instanceof Element && target.closest("[data-design-select-ui]")) {
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       const element = getSelectableElement(event.target);
       if (!element) return;
 
@@ -148,7 +163,7 @@ export function DesignSelectLayerActive() {
       document.removeEventListener("mouseleave", handleMouseLeave);
       document.removeEventListener("click", handleClick, true);
     };
-  }, [chat, updateHover]);
+  }, [chat, selectionLocked, updateHover]);
 
   const displayHighlight = trackedElement ? highlight : null;
 
@@ -174,6 +189,7 @@ export function DesignSelectLayerActive() {
           elementLabel={chat.label}
           elementContext={buildElementContext(chat.element)}
           onClose={clearSelection}
+          onSelectionLockChange={setSelectionLocked}
           onPreviewReady={handlePreviewReady}
         />
       ) : null}

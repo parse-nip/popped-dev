@@ -11,7 +11,7 @@ export function runStatusMessage(status: string): string | null {
     case "RUNNING":
       return "Agent is working…";
     case "FINISHED":
-      return "Changes pushed — preparing preview…";
+      return "Changes saved — waiting for deploy…";
     case "ERROR":
       return "Agent run failed.";
     case "CANCELLED":
@@ -23,26 +23,75 @@ export function runStatusMessage(status: string): string | null {
   }
 }
 
-export function toolCallMessage(name: string, status: string): string | null {
-  if (status !== "running") return null;
+export type ActivityStepPayload = {
+  id: string;
+  label: string;
+  state: "running" | "done";
+};
 
+export function statusToStep(status: string): ActivityStepPayload | null {
+  switch (status) {
+    case "CREATING":
+      return { id: "start", label: "Starting agent", state: "running" };
+    case "RUNNING":
+      return { id: "work", label: "Working on your design", state: "running" };
+    case "FINISHED":
+      return { id: "save", label: "Changes saved", state: "done" };
+    default:
+      return null;
+  }
+}
+
+export function toolCallToStep(name: string, status: string): ActivityStepPayload | null {
   const normalized = name.toLowerCase();
+  const done = status === "completed" || status === "finished" || status === "success";
+
   if (normalized.includes("edit") || normalized.includes("write") || normalized === "search_replace") {
-    return "Editing styles…";
+    return {
+      id: "edit",
+      label: done ? "Edited presentation files" : "Editing presentation files",
+      state: done ? "done" : "running",
+    };
   }
   if (normalized === "read_file" || normalized.includes("read")) {
-    return "Reading project files…";
+    return {
+      id: "read",
+      label: done ? "Read project files" : "Reading project files",
+      state: done ? "done" : "running",
+    };
   }
   if (normalized.includes("grep") || normalized.includes("search") || normalized === "codebase_search") {
-    return "Searching the codebase…";
+    return {
+      id: "search",
+      label: done ? "Searched the codebase" : "Searching the codebase",
+      state: done ? "done" : "running",
+    };
   }
   if (normalized.includes("terminal") || normalized === "run_terminal_cmd") {
-    return "Running build commands…";
+    return {
+      id: "terminal",
+      label: done ? "Ran build commands" : "Running build commands",
+      state: done ? "done" : "running",
+    };
   }
   if (normalized.includes("git") || normalized.includes("push")) {
-    return "Pushing branch to GitHub…";
+    return {
+      id: "save",
+      label: done ? "Saved changes to GitHub" : "Saving changes to GitHub",
+      state: done ? "done" : "running",
+    };
   }
-  return `Running ${name}…`;
+
+  if (status !== "running" && !done) return null;
+  return {
+    id: `tool-${normalized.replace(/[^a-z0-9]+/g, "-")}`,
+    label: done ? `Finished ${name}` : `Running ${name}`,
+    state: done ? "done" : "running",
+  };
+}
+
+export function toolCallMessage(name: string, status: string): string | null {
+  return toolCallToStep(name, status)?.label ?? null;
 }
 
 export type ParsedSsePart = {

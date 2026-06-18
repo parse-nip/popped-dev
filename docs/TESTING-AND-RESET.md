@@ -7,9 +7,10 @@ Use this when you want to try design mode end-to-end and return to a clean basel
 | Layer | What gets created | Affects production? |
 |---|---|---|
 | **Browser** | `localStorage` (welcome, contributor name), `sessionStorage` (agent session) | No |
-| **Worker KV** | `session:*`, `run:*`, `ratelimit:*` keys | No |
+| **Worker KV** | `session:*`, `run:*`, `ratelimit:*`, `merge-cooldown:*` keys | No |
 | **GitHub** | Branch `cursor/design/{sessionId}` with style commits | No, until merged |
 | **GitHub** | Optional PR (if you submit for review) | Only if merged |
+| **Auto cleanup** | Hourly cron deletes idle branches after ~1 hour | No |
 | **Cloudflare Pages** | Preview deployment for the test branch | No (preview URL only) |
 | **Cursor** | Cloud agent runs (`bc-*`) | No |
 
@@ -118,12 +119,14 @@ Pages will redeploy reverted `main`. This is the only way to “reset production
 ```text
 1. Level 2 (browser)     → fresh UX
 2. Run your test           → design chat + preview
-3. Level 4 (git branches) → delete cursor/design/*
+3. Wait ~1 hour (or Level 4) → auto/manual branch cleanup
 4. Level 3 (KV)            → clear rate limits if you hit 5/hour
 5. Do NOT merge test PRs
 ```
 
-Preview deployments on Pages for deleted branches become stale URLs; harmless.
+Abandoned `cursor/design/*` branches are deleted automatically by the agent Worker cron (default: 1 hour of inactivity). Branches with open PRs are kept.
+
+After **Merge to main**, the Worker enforces a **30-minute cooldown** per IP before a new cloud agent can start (Cursor allows one agent per chat). The browser clears `sessionStorage` and shows a countdown in the header.
 
 ---
 

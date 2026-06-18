@@ -1,4 +1,8 @@
 import { readContributorName } from "@/lib/contributor-name";
+import {
+  MERGE_COOLDOWN_MS,
+  setLocalMergeCooldown,
+} from "@/lib/merge-cooldown";
 import type { ElementContext } from "./element-context";
 
 const SESSION_ID_KEY = "popped.dev:agent-session-id";
@@ -47,6 +51,32 @@ export function getSessionId(): string {
   return sessionId;
 }
 
+export function clearAgentSession(): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(SESSION_ID_KEY);
+  sessionStorage.removeItem(AGENT_ID_KEY);
+}
+
+function parseAgentError(
+  response: Response,
+  payload: {
+    error?: string;
+    message?: string;
+    code?: string;
+    retryAfterSeconds?: number;
+  } | null,
+): Error {
+  if (response.status === 429 && payload?.code === "merge_cooldown") {
+    const seconds = payload.retryAfterSeconds ?? MERGE_COOLDOWN_MS / 1000;
+    setLocalMergeCooldown(Date.now() + seconds * 1000);
+    const minutes = Math.ceil(seconds / 60);
+    return new Error(
+      `You just merged a design — wait ~${minutes} min before starting a new cloud agent.`,
+    );
+  }
+  return new Error(payload?.message ?? payload?.error ?? "Agent request failed.");
+}
+
 export function getStoredAgentId(): string | null {
   if (typeof window === "undefined") return null;
   return sessionStorage.getItem(AGENT_ID_KEY);
@@ -59,7 +89,8 @@ export function storeAgentId(agentId: string): void {
 export type AgentStreamEvent =
   | { type: "assistant"; text: string }
   | { type: "status"; message: string }
-  | { type: "preview"; previewUrl: string; branch: string }
+  | { type: "step"; id: string; label: string; state: "running" | "done" }
+  | { type: "preview"; previewUrl: string; branch: string; ready?: boolean; sha?: string | null; progress?: number; phase?: string }
   | { type: "error"; message: string }
   | { type: "done" };
 
@@ -70,6 +101,8 @@ export type RunStatusPayload = {
   result?: string | null;
   branch?: string;
   previewUrl?: string;
+  previewReady?: boolean;
+  previewSha?: string | null;
   done: boolean;
 };
 
@@ -87,10 +120,10 @@ async function pollRunUntilDone(
   runId: string,
   agentId: string,
   onEvent: (event: AgentStreamEvent) => void,
-  flags: { previewReceived: boolean; assistantSent: boolean },
+  flags: { previewReceived: boolean; assistantSent: boolean; previewReady: boolean },
   maxAttempts = 90,
 ): Promise<void> {
-  onEvent({ type: "status", message: "Checking agent progress…" });
+  onEvent({ type: "step", id: "reconnect", label: "Checking agent progress", state: "running" });
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const data = await fetchRunStatus(runId, agentId);
@@ -102,22 +135,54 @@ async function pollRunUntilDone(
 
     if (data.previewUrl && data.branch && !flags.previewReceived) {
       flags.previewReceived = true;
-      onEvent({ type: "preview", previewUrl: data.previewUrl, branch: data.branch });
-      onEvent({ type: "status", message: "Opening preview…" });
+      onEvent({
+        type: "preview",
+        previewUrl: data.previewUrl,
+        branch: data.branch,
+        ready: data.previewReady,
+        sha: data.previewSha ?? null,
+      });
+    } else if (data.previewUrl && data.branch && data.previewReady && !flags.previewReady) {
+      flags.previewReady = true;
+      onEvent({
+        type: "preview",
+        previewUrl: data.previewUrl,
+        branch: data.branch,
+        ready: true,
+        sha: data.previewSha ?? null,
+      });
     }
 
     if (data.done) {
       if (data.status === "ERROR") {
         onEvent({ type: "error", message: "Agent run failed." });
+        onEvent({ type: "done" });
+        return;
       }
-      onEvent({ type: "done" });
-      return;
+
+      if (data.previewReady) {
+        onEvent({ type: "step", id: "deploy", label: "Preview ready", state: "done" });
+        onEvent({ type: "done" });
+        return;
+      }
+
+      onEvent({ type: "step", id: "deploy", label: "Building preview", state: "running" });
+    } else if (!data.done) {
+      const step =
+        data.status === "RUNNING"
+          ? { id: "work", label: "Working on your design", state: "running" as const }
+          : data.status === "CREATING"
+            ? { id: "start", label: "Starting agent", state: "running" as const }
+            : null;
+      if (step) {
+        onEvent({ type: "step", ...step });
+      }
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
-  onEvent({ type: "error", message: "Agent run timed out." });
+  onEvent({ type: "error", message: "Preview deploy timed out — try View preview in a moment." });
   onEvent({ type: "done" });
 }
 
@@ -140,8 +205,17 @@ export async function ensureSession(): Promise<{
   });
 
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(payload?.error ?? "Could not start agent session.");
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string;
+      message?: string;
+      code?: string;
+      retryAfterSeconds?: number;
+    } | null;
+    if (response.status === 409 && payload?.code === "session_merged") {
+      clearAgentSession();
+      throw new Error(payload.message ?? "This session ended after merge. Try again.");
+    }
+    throw parseAgentError(response, payload);
   }
 
   const data = (await response.json()) as {
@@ -157,7 +231,12 @@ export async function ensureSession(): Promise<{
 export async function sendAgentMessage(params: {
   message: string;
   elementContext: ElementContext;
-}): Promise<{ runId: string; agentId: string; branch: string }> {
+}): Promise<{
+  runId: string;
+  agentId: string;
+  branch: string;
+  attachedToActiveRun?: boolean;
+}> {
   const contributorName = getContributorName();
   if (!contributorName) {
     throw new Error("Enter your name in the intro section before chatting with the agent.");
@@ -177,14 +256,27 @@ export async function sendAgentMessage(params: {
   });
 
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(payload?.error ?? "Agent message failed.");
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string;
+      message?: string;
+      code?: string;
+      retryAfterSeconds?: number;
+    } | null;
+    if (response.status === 409 && payload?.code === "session_merged") {
+      clearAgentSession();
+      throw new Error(payload.message ?? "This session ended after merge. Try again.");
+    }
+    if (response.status === 409 && payload?.code === "agent_busy") {
+      throw new Error("Agent is still working on your last request. Wait for it to finish.");
+    }
+    throw parseAgentError(response, payload);
   }
 
   const data = (await response.json()) as {
     runId: string;
     agentId: string;
     branch: string;
+    attachedToActiveRun?: boolean;
   };
 
   storeAgentId(data.agentId);
@@ -196,7 +288,13 @@ export function streamAgentRun(
   agentId: string,
   onEvent: (event: AgentStreamEvent) => void,
 ): () => void {
-  const flags = { previewReceived: false, assistantSent: false, doneReceived: false, closed: false };
+  const flags = {
+    previewReceived: false,
+    assistantSent: false,
+    previewReady: false,
+    doneReceived: false,
+    closed: false,
+  };
   let source: EventSource | null = null;
 
   const finish = () => {
@@ -211,6 +309,7 @@ export function streamAgentRun(
     void pollRunUntilDone(runId, agentId, (event) => {
       if (event.type === "preview") flags.previewReceived = true;
       if (event.type === "assistant") flags.assistantSent = true;
+      if (event.type === "preview" && event.ready) flags.previewReady = true;
       if (event.type === "done") flags.doneReceived = true;
       onEvent(event);
     }, flags).finally(finish);
@@ -232,6 +331,26 @@ export function streamAgentRun(
     }
   });
 
+  source.addEventListener("step", (event) => {
+    try {
+      const data = JSON.parse(event.data) as {
+        id?: string;
+        label?: string;
+        state?: "running" | "done";
+      };
+      if (data.id && data.label && data.state) {
+        onEvent({
+          type: "step",
+          id: data.id,
+          label: data.label,
+          state: data.state,
+        });
+      }
+    } catch {
+      // ignore malformed events
+    }
+  });
+
   source.addEventListener("status", (event) => {
     try {
       const data = JSON.parse(event.data) as { message?: string; status?: string };
@@ -246,10 +365,26 @@ export function streamAgentRun(
 
   source.addEventListener("preview", (event) => {
     try {
-      const data = JSON.parse(event.data) as { previewUrl?: string; branch?: string };
+      const data = JSON.parse(event.data) as {
+        previewUrl?: string;
+        branch?: string;
+        ready?: boolean;
+        sha?: string | null;
+        progress?: number;
+        phase?: string;
+      };
       if (data.previewUrl && data.branch) {
         flags.previewReceived = true;
-        onEvent({ type: "preview", previewUrl: data.previewUrl, branch: data.branch });
+        if (data.ready) flags.previewReady = true;
+        onEvent({
+          type: "preview",
+          previewUrl: data.previewUrl,
+          branch: data.branch,
+          ready: data.ready,
+          sha: data.sha ?? null,
+          progress: data.progress,
+          phase: data.phase,
+        });
       }
     } catch {
       // ignore malformed events
@@ -280,8 +415,8 @@ export function streamAgentRun(
     }
 
     if (!flags.doneReceived) {
-      onEvent({ type: "done" });
-      flags.doneReceived = true;
+      maybePoll();
+      return;
     }
     finish();
   });
@@ -290,6 +425,10 @@ export function streamAgentRun(
     if (flags.doneReceived) return;
     flags.doneReceived = true;
     onEvent({ type: "done" });
+    if (!flags.previewReady) {
+      maybePoll();
+      return;
+    }
     finish();
   });
 
@@ -297,45 +436,20 @@ export function streamAgentRun(
     if (flags.doneReceived) return;
     flags.doneReceived = true;
     onEvent({ type: "done" });
+    if (!flags.previewReady) {
+      maybePoll();
+      return;
+    }
     finish();
   });
 
   return finish;
 }
 
-async function pollRun(runId: string, agentId: string, maxAttempts = 60) {
-  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const response = await fetch(
-      apiUrl(`/api/agent/runs/${encodeURIComponent(runId)}?agentId=${encodeURIComponent(agentId)}`),
-    );
-    if (!response.ok) {
-      throw new Error("Could not poll agent run.");
-    }
-
-    const data = (await response.json()) as {
-      status: string;
-      prUrl?: string | null;
-      done?: boolean;
-    };
-
-    if (data.prUrl) {
-      return data;
-    }
-
-    if (data.done) {
-      return data;
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-
-  throw new Error("Submit run timed out.");
-}
-
 export async function submitForReview(params: {
   runId: string;
   branch: string;
-}): Promise<{ prUrl: string | null; status: string; submitRunId: string }> {
+}): Promise<{ mergeCommitUrl: string | null; status: string; submitRunId: string }> {
   const contributorName = getContributorName();
   if (!contributorName) {
     throw new Error("Contributor name is required.");
@@ -353,43 +467,73 @@ export async function submitForReview(params: {
   );
 
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-    throw new Error(payload?.error ?? "Submit for review failed.");
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string;
+      message?: string;
+      code?: string;
+    } | null;
+    throw new Error(payload?.message ?? payload?.error ?? "Publish failed.");
   }
 
-  const started = (await response.json()) as {
+  const result = (await response.json()) as {
     runId: string;
-    agentId: string;
     branch: string;
+    mergeCommitUrl?: string | null;
+    cooldownSeconds?: number;
   };
 
-  const completed = await pollRun(started.runId, started.agentId);
+  const cooldownSeconds = result.cooldownSeconds ?? MERGE_COOLDOWN_MS / 1000;
+  setLocalMergeCooldown(Date.now() + cooldownSeconds * 1000);
+  clearAgentSession();
+
   return {
-    prUrl: completed.prUrl ?? null,
-    status: completed.status,
-    submitRunId: started.runId,
+    mergeCommitUrl: result.mergeCommitUrl ?? null,
+    status: "merged",
+    submitRunId: result.runId,
   };
 }
 
-export async function fetchPreviewUrl(branch: string): Promise<{
+export type PreviewDeployPhase =
+  | "waiting_for_push"
+  | "queued"
+  | "building"
+  | "live"
+  | "failed";
+
+export type PreviewDeployStatus = {
   previewUrl: string;
   ready: boolean;
   branch: string;
-}> {
+  sha: string | null;
+  progress: number;
+  phase: PreviewDeployPhase;
+};
+export async function fetchPreviewUrl(branch: string): Promise<PreviewDeployStatus> {
   const response = await fetch(
     apiUrl(`/api/agent/preview?branch=${encodeURIComponent(branch)}`),
   );
   if (!response.ok) {
     throw new Error("Could not resolve preview URL.");
   }
-  return (await response.json()) as {
+  const data = (await response.json()) as {
     previewUrl: string;
     ready: boolean;
     branch: string;
+    sha: string | null;
+    progress?: number;
+    phase?: PreviewDeployPhase;
+  };
+  return {
+    previewUrl: data.previewUrl,
+    ready: data.ready,
+    branch: data.branch,
+    sha: data.sha,
+    progress: data.progress ?? (data.ready ? 100 : 35),
+    phase: data.phase ?? (data.ready ? "live" : "building"),
   };
 }
 
-/** @deprecated Use fetchPreviewUrl; kept for local fallback display. */
+/** Heuristic Cloudflare Pages preview URL from branch name (used before API resolves). */
 export function branchToPreviewUrl(branch: string): string {
   const alias = branch
     .toLowerCase()

@@ -15,22 +15,26 @@ export type PreviewMode = "live" | "preview";
 type PreviewContextValue = {
   mode: PreviewMode;
   previewUrl: string | null;
+  previewRevision: string | null;
+  previewDeployReady: boolean;
   branch: string | null;
   runId: string | null;
   agentId: string | null;
   reviewOpen: boolean;
-  prUrl: string | null;
+  publishedUrl: string | null;
   showPreview: (params: {
     previewUrl: string;
     branch: string;
     runId: string;
     agentId: string;
+    ready?: boolean;
+    sha?: string | null;
   }) => void;
-  updatePreviewUrl: (previewUrl: string) => void;
+  updatePreviewUrl: (previewUrl: string, revision?: string | null) => void;
   backToLive: () => void;
   openReview: () => void;
   closeReview: () => void;
-  setPrUrl: (url: string | null) => void;
+  setPublishedUrl: (url: string | null) => void;
 };
 
 const PreviewContext = createContext<PreviewContextValue | null>(null);
@@ -38,11 +42,13 @@ const PreviewContext = createContext<PreviewContextValue | null>(null);
 export function PreviewProvider({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<PreviewMode>("live");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewRevision, setPreviewRevision] = useState<string | null>(null);
+  const [previewDeployReady, setPreviewDeployReady] = useState(false);
   const [branch, setBranch] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [agentId, setAgentId] = useState<string | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const [prUrl, setPrUrl] = useState<string | null>(null);
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
 
   const showPreview = useCallback(
     (params: {
@@ -50,31 +56,40 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
       branch: string;
       runId: string;
       agentId: string;
+      ready?: boolean;
+      sha?: string | null;
     }) => {
       setBranch(params.branch);
       setRunId(params.runId);
       setAgentId(params.agentId);
       setMode("preview");
       setPreviewUrl(params.previewUrl);
+      setPreviewRevision(params.sha ?? null);
+      setPreviewDeployReady(params.ready === true);
 
       void fetchPreviewUrl(params.branch)
         .then((resolved) => {
           setPreviewUrl(resolved.previewUrl);
+          if (resolved.sha) setPreviewRevision(resolved.sha);
+          setPreviewDeployReady(resolved.ready);
         })
         .catch(() => {
-          // keep initial URL; PreviewFrame will retry
+          // PreviewFrame keeps polling
         });
     },
     [],
   );
 
-  const updatePreviewUrl = useCallback((url: string) => {
+  const updatePreviewUrl = useCallback((url: string, revision?: string | null) => {
     setPreviewUrl(url);
+    if (revision) setPreviewRevision(revision);
   }, []);
 
   const backToLive = useCallback(() => {
     setMode("live");
     setReviewOpen(false);
+    setPreviewDeployReady(false);
+    setPreviewRevision(null);
   }, []);
 
   const openReview = useCallback(() => {
@@ -89,26 +104,30 @@ export function PreviewProvider({ children }: { children: ReactNode }) {
     () => ({
       mode,
       previewUrl,
+      previewRevision,
+      previewDeployReady,
       branch,
       runId,
       agentId,
       reviewOpen,
-      prUrl,
+      publishedUrl,
       showPreview,
       updatePreviewUrl,
       backToLive,
       openReview,
       closeReview,
-      setPrUrl,
+      setPublishedUrl,
     }),
     [
       mode,
       previewUrl,
+      previewRevision,
+      previewDeployReady,
       branch,
       runId,
       agentId,
       reviewOpen,
-      prUrl,
+      publishedUrl,
       showPreview,
       updatePreviewUrl,
       backToLive,

@@ -26,7 +26,7 @@ export function PreviewBar() {
             Back to live site
           </Button>
           <Button type="button" size="sm" onClick={openReview}>
-            Submit for review
+            Publish to site
           </Button>
         </div>
       </div>

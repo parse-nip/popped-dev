@@ -13,6 +13,11 @@ preview_id = "f93d5fe63942416a86c255c140616f7b"
 PAGES_PROJECT_NAME = "popped-dev"
 GITHUB_REPO_URL = "https://github.com/parse-nip/popped-dev"
 CORS_ORIGIN = "https://popped.dev"
+# Inactive design sessions + branches cleaned after this many ms (default: 1 hour).
+CLEANUP_TTL_MS = "3600000"
+
+[triggers]
+crons = ["0 * * * *"]
 
 [[routes]]
 pattern = "popped.dev/api/*"

@@ -11,14 +11,19 @@ export type ElementContextPayload = {
 
 export type SessionRecord = {
   sessionId: string;
+  /** Empty until the first design message creates a Cursor cloud agent. */
   agentId: string;
   contributorName: string;
   branch: string;
   createdAt: number;
   lastRunAt: number;
   runCount: number;
-  /** Set when a contributor submits for review — branch is kept until PR is closed. */
+  /** Latest run that may still be in progress. */
+  activeRunId?: string;
+  /** Set after contributor publishes — branch is kept until cleanup TTL. */
   protected?: boolean;
+  /** Timestamp when the design was merged to main. */
+  mergedAt?: number;
 };
 
 export type RunRecord = {
@@ -27,6 +32,7 @@ export type RunRecord = {
   agentId: string;
   branch?: string;
   prUrl?: string;
+  mergeCommitUrl?: string;
   status?: string;
   createdAt: number;
 };
@@ -46,6 +52,8 @@ export type Env = {
   CORS_ORIGIN: string;
   /** Milliseconds of inactivity before session branch + KV are cleaned up. Default: 3600000 (1 hour). */
   CLEANUP_TTL_MS?: string;
+  /** Cooldown after merge before a new cloud agent can start. Default: 1800000 (30 minutes). */
+  MERGE_COOLDOWN_MS?: string;
 };
 
 export type GitBranchInfo = {

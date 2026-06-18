@@ -8,7 +8,7 @@ Visitors chat with a Cursor AI agent to design and polish the site. Locked secti
 
 **Flow (phased):**
 
-1. **Phase 1 (this PR):** Site skeleton, locked resume HTML, intro, chat UI shell, CI guards
+1. **Phase 1 (this PR):** Site skeleton, locked resume HTML, intro, chat UI shell, locked-content checksums
 2. **Phase 2:** Cursor SDK agent loop + live preview
 3. **Phase 3:** Confirm → PR → checker agent → merge
 4. **Phase 4:** Hover attribution via `contributions.json`
@@ -25,7 +25,7 @@ Visitors chat with a Cursor AI agent to design and polish the site. Locked secti
 - `src/components/locked/LockedResume.tsx` — renders facts; restyle freely
 - `src/app/globals.css` — CSS targeting `#locked-resume` and `.locked-resume-*`
 
-CI runs `npm run verify:locked` on every PR.
+Run locally with `npm run verify:locked` after editing locked fact files.
 
 **Owner only:** after editing locked fact files, regenerate checksums:
 
@@ -47,7 +47,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 Static export via `output: "export"`. Build command: `npm run build`. Output directory: `out`.
 
-Production deploys when you push to `main` via **Cloudflare Pages Git integration** (build `npm run build`, output `out`). CI on PRs runs via [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+Production deploys when you push to `main` via **Cloudflare Pages Git integration** (build `npm run build`, output `out`).
 
 **Testing the agent flow and resetting:** see [`docs/TESTING-AND-RESET.md`](docs/TESTING-AND-RESET.md).
 

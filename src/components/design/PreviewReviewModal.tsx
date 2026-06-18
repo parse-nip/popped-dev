@@ -13,6 +13,8 @@ import {
 import { usePreview } from "@/components/design/PreviewContext";
 import { PreviewFrame } from "@/components/design/PreviewFrame";
 import { getContributorName, submitForReview } from "@/lib/agent-client";
+import { formatCooldownRemaining, MERGE_COOLDOWN_MS } from "@/lib/merge-cooldown";
+import { buildPreviewEmbedUrl } from "@/lib/draft-preview";
 
 export function PreviewReviewModal() {
   const {
@@ -20,10 +22,11 @@ export function PreviewReviewModal() {
     closeReview,
     branch,
     previewUrl,
+    previewRevision,
     runId,
     agentId,
-    prUrl,
-    setPrUrl,
+    publishedUrl,
+    setPublishedUrl,
   } = usePreview();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,14 +42,14 @@ export function PreviewReviewModal() {
 
     try {
       const result = await submitForReview({ runId, branch });
-      if (result.prUrl) {
-        setPrUrl(result.prUrl);
+      if (result.mergeCommitUrl) {
+        setPublishedUrl(result.mergeCommitUrl);
       } else {
-        setError("PR not ready yet. Check the agent dashboard or try again shortly.");
+        setError("Merge did not return a commit link. Try again shortly.");
       }
     } catch (submitError) {
       const message =
-        submitError instanceof Error ? submitError.message : "Submit for review failed.";
+        submitError instanceof Error ? submitError.message : "Publish failed.";
       setError(message);
     } finally {
       setIsSubmitting(false);
@@ -59,9 +62,9 @@ export function PreviewReviewModal() {
     <Dialog open={reviewOpen} onOpenChange={(open) => !open && closeReview()}>
       <DialogContent showCloseButton className="preview-review-modal">
         <DialogHeader className="preview-review-modal-header">
-          <DialogTitle>Submit your design</DialogTitle>
+          <DialogTitle>Publish your design</DialogTitle>
           <DialogDescription>
-            Check the draft below, then open a pull request so the site owner can review and merge.
+            Check the draft below, then merge it to main so it goes live on popped.dev.
           </DialogDescription>
         </DialogHeader>
 
@@ -78,7 +81,7 @@ export function PreviewReviewModal() {
                 <span className="preview-review-modal-label">Preview link</span>
                 <a
                   className="preview-review-modal-link"
-                  href={previewUrl}
+                  href={buildPreviewEmbedUrl(previewUrl, previewRevision)}
                   target="_blank"
                   rel="noreferrer"
                 >
@@ -91,16 +94,17 @@ export function PreviewReviewModal() {
           <PreviewFrame compact />
 
           {isSubmitting ? (
-            <p className="preview-review-modal-status">Opening pull request…</p>
+            <p className="preview-review-modal-status">Merging to main on GitHub…</p>
           ) : null}
           {error ? <p className="preview-review-modal-error">{error}</p> : null}
-          {prUrl ? (
+          {publishedUrl ? (
             <p className="preview-review-modal-success">
-              Pull request opened —{" "}
-              <a href={prUrl} target="_blank" rel="noreferrer">
-                view on GitHub
+              Merged to main —{" "}
+              <a href={publishedUrl} target="_blank" rel="noreferrer">
+                view commit on GitHub
               </a>
-              .
+              . Cloudflare Pages will rebuild the live site shortly. You can start a new design in{" "}
+              {formatCooldownRemaining(MERGE_COOLDOWN_MS)}.
             </p>
           ) : null}
         </div>
@@ -109,8 +113,8 @@ export function PreviewReviewModal() {
           <Button type="button" variant="outline" onClick={closeReview} disabled={isSubmitting}>
             Keep editing
           </Button>
-          <Button type="button" onClick={handleSubmit} disabled={isSubmitting || Boolean(prUrl)}>
-            {isSubmitting ? "Opening PR…" : "Open pull request"}
+          <Button type="button" onClick={handleSubmit} disabled={isSubmitting || Boolean(publishedUrl)}>
+            {isSubmitting ? "Merging…" : "Merge to main"}
           </Button>
         </DialogFooter>
       </DialogContent>

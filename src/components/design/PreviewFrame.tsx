@@ -1,45 +1,80 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { PreviewProgressOverlay } from "@/components/design/PreviewProgressOverlay";
 import { usePreview } from "@/components/design/PreviewContext";
 import { fetchPreviewUrl } from "@/lib/agent-client";
+import { buildPreviewEmbedUrl } from "@/lib/draft-preview";
 
 type PreviewFrameProps = {
   compact?: boolean;
 };
 
-export function PreviewFrame({ compact = false }: PreviewFrameProps) {
-  const { previewUrl, branch, updatePreviewUrl } = usePreview();
-  const [status, setStatus] = useState<"loading" | "ready" | "building">("loading");
-  const [frameUrl, setFrameUrl] = useState<string | null>(previewUrl);
+function nextMonotonicProgress(current: number, incoming: number): number {
+  return Math.max(current, Math.min(99, incoming));
+}
+
+type PreviewFrameInnerProps = {
+  compact: boolean;
+  branch: string;
+  contextPreviewUrl: string | null;
+  previewRevision: string | null;
+  previewDeployReady: boolean;
+  updatePreviewUrl: (url: string, revision?: string | null) => void;
+};
+
+function PreviewFrameInner({
+  compact,
+  branch,
+  contextPreviewUrl,
+  previewRevision,
+  previewDeployReady,
+  updatePreviewUrl,
+}: PreviewFrameInnerProps) {
+  const [status, setStatus] = useState<"loading" | "ready" | "building">("building");
+  const [frameUrl, setFrameUrl] = useState<string | null>(null);
+  const [frameRevision, setFrameRevision] = useState<string | null>(null);
+  const [progress, setProgress] = useState(6);
+  const [reloadKey, setReloadKey] = useState(0);
+  const progressRef = useRef(6);
+
+  const setMonotonicProgress = useCallback((incoming: number) => {
+    const next = nextMonotonicProgress(progressRef.current, incoming);
+    progressRef.current = next;
+    setProgress(next);
+  }, []);
 
   useEffect(() => {
-    setFrameUrl(previewUrl);
-    setStatus(previewUrl ? "loading" : "building");
-  }, [previewUrl]);
-
-  useEffect(() => {
-    if (!branch) return;
-    const branchName = branch;
-
     let cancelled = false;
 
     async function resolvePreview() {
       try {
-        for (let attempt = 0; attempt < 45; attempt += 1) {
-          const result = await fetchPreviewUrl(branchName);
+        for (let attempt = 0; attempt < 80; attempt += 1) {
+          if (previewDeployReady && contextPreviewUrl && previewRevision) {
+            setFrameRevision(previewRevision);
+            setFrameUrl(buildPreviewEmbedUrl(contextPreviewUrl, previewRevision));
+            setStatus("loading");
+            setMonotonicProgress(90);
+            return;
+          }
+
+          const result = await fetchPreviewUrl(branch);
           if (cancelled) return;
 
-          setFrameUrl(result.previewUrl);
-          updatePreviewUrl(result.previewUrl);
+          const revision = result.sha ?? previewRevision;
+          updatePreviewUrl(result.previewUrl, result.sha ?? null);
+          setMonotonicProgress(result.progress ?? 12 + attempt * 2);
 
           if (result.ready) {
-            setStatus("ready");
+            setFrameRevision(revision);
+            setFrameUrl(buildPreviewEmbedUrl(result.previewUrl, revision));
+            setStatus("loading");
+            setMonotonicProgress(90);
             return;
           }
 
           setStatus("building");
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          await new Promise((resolve) => setTimeout(resolve, 1500));
         }
       } catch {
         if (!cancelled) {
@@ -52,12 +87,40 @@ export function PreviewFrame({ compact = false }: PreviewFrameProps) {
     return () => {
       cancelled = true;
     };
-  }, [branch, updatePreviewUrl]);
+  }, [
+    branch,
+    contextPreviewUrl,
+    previewRevision,
+    previewDeployReady,
+    reloadKey,
+    setMonotonicProgress,
+    updatePreviewUrl,
+  ]);
+
+  useEffect(() => {
+    if (status !== "loading") return;
+
+    const interval = window.setInterval(() => {
+      if (progressRef.current >= 99) return;
+      setMonotonicProgress(progressRef.current + 2);
+    }, 120);
+
+    return () => window.clearInterval(interval);
+  }, [status, frameUrl, setMonotonicProgress]);
+
+  const retryPreview = useCallback(() => {
+    progressRef.current = 6;
+    setProgress(6);
+    setFrameUrl(null);
+    setFrameRevision(null);
+    setStatus("building");
+    setReloadKey((key) => key + 1);
+  }, []);
 
   if (!frameUrl) {
     return (
       <div className={compact ? "preview-frame-shell preview-frame-shell--compact" : "preview-frame-shell"}>
-        <p className="preview-frame-message">Waiting for preview URL…</p>
+        <PreviewProgressOverlay compact={compact} phase="building" progress={progress} />
       </div>
     );
   }
@@ -65,21 +128,50 @@ export function PreviewFrame({ compact = false }: PreviewFrameProps) {
   return (
     <div className={compact ? "preview-frame-shell preview-frame-shell--compact" : "preview-frame-shell"}>
       {status !== "ready" ? (
-        <div className="preview-frame-overlay" aria-live="polite">
-          <p className="preview-frame-message">
-            {status === "building"
-              ? "Cloudflare Pages is building your draft…"
-              : "Loading preview…"}
-          </p>
-        </div>
+        <PreviewProgressOverlay
+          compact={compact}
+          phase={status === "building" ? "building" : "loading"}
+          progress={progress}
+        />
       ) : null}
+      <div className="preview-frame-header-shield" aria-hidden="true" title="Design mode disabled in draft preview" />
       <iframe
+        key={`${frameRevision ?? frameUrl}-${reloadKey}`}
         className="preview-frame"
         src={frameUrl}
         title="Design preview"
         sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-        onLoad={() => setStatus("ready")}
+        onLoad={() => {
+          progressRef.current = 100;
+          setProgress(100);
+          setStatus("ready");
+        }}
+        onError={retryPreview}
       />
     </div>
+  );
+}
+
+export function PreviewFrame({ compact = false }: PreviewFrameProps) {
+  const {
+    branch,
+    previewUrl: contextPreviewUrl,
+    previewRevision,
+    previewDeployReady,
+    updatePreviewUrl,
+  } = usePreview();
+
+  if (!branch) return null;
+
+  return (
+    <PreviewFrameInner
+      key={branch}
+      compact={compact}
+      branch={branch}
+      contextPreviewUrl={contextPreviewUrl}
+      previewRevision={previewRevision}
+      previewDeployReady={previewDeployReady}
+      updatePreviewUrl={updatePreviewUrl}
+    />
   );
 }

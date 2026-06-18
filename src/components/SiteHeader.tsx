@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
 import { useDesignMode } from "@/components/design/DesignModeContext";
+import { usePreview } from "@/components/design/PreviewContext";
+import { formatCooldownRemaining } from "@/lib/merge-cooldown";
+import { useMergeCooldown } from "@/lib/use-merge-cooldown";
+import { isDraftPreviewEmbed } from "@/lib/draft-preview";
 
 function DesignCursorIcon() {
   return (
@@ -24,6 +28,10 @@ function DesignCursorIcon() {
 
 export function SiteHeader() {
   const { isDesignMode, toggleDesignMode } = useDesignMode();
+  const { mode: previewMode } = usePreview();
+  const { active: mergeCooldownActive, remainingMs } = useMergeCooldown();
+  const designDisabled =
+    previewMode === "preview" || isDraftPreviewEmbed() || mergeCooldownActive;
 
   return (
     <header className="site-header" data-design-select-ui>
@@ -33,6 +41,20 @@ export function SiteHeader() {
 
       <div className="site-header-actions">
         <ContributorNameControl />
+        {designDisabled ? (
+          <span
+            className="site-header-design-locked"
+            title={
+              mergeCooldownActive
+                ? "Wait before starting a new cloud agent after merging"
+                : "Design changes are disabled while reviewing your draft"
+            }
+          >
+            {mergeCooldownActive
+              ? `New design in ${formatCooldownRemaining(remainingMs)}`
+              : "Review only"}
+          </span>
+        ) : (
         <button
         type="button"
         role="switch"
@@ -53,6 +75,7 @@ export function SiteHeader() {
           <span className="site-header-design-switch-thumb" />
         </span>
       </button>
+        )}
       </div>
     </header>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { DesignModeProvider } from "@/components/design/DesignModeContext";
+import { DesignModePreviewGuard } from "@/components/design/DesignModePreviewGuard";
 import { DesignSelectLayer } from "@/components/design/DesignSelectLayer";
 import { PreviewBar } from "@/components/design/PreviewBar";
 import { PreviewFrame } from "@/components/design/PreviewFrame";
@@ -34,6 +35,7 @@ export function HomeShell() {
   return (
     <DesignModeProvider>
       <PreviewProvider>
+        <DesignModePreviewGuard />
         <SiteHeader />
         <HomeMain />
         <DesignSelectLayer />

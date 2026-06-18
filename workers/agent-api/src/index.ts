@@ -3,29 +3,52 @@ import { cors } from "hono/cors";
 import { cleanupTtlSeconds, runCleanup } from "./cleanup";
 import {
   createCloudAgent,
-  createCloudRun,
+  createCloudRunWhenReady,
   extractBranch,
   extractPrUrl,
+  getActiveRun,
   getCloudRun,
+  isAgentBusyError,
   streamCloudRun,
 } from "./cursor-api";
-import { ensureGitBranch } from "./github";
-import { buildDesignPrompt, buildSubmitPrompt } from "./prompts";
-import { resolvePagesPreviewUrl, isPreviewUrlLive } from "./pages-preview";
+import {
+  appendContributionEntry,
+  deleteGitBranch,
+  ensureGitBranch,
+  listChangedFilesOnBranch,
+  mergeBranchIntoBase,
+  mergeMainIntoBranch,
+} from "./github";
+import { buildDesignPrompt, buildMergeCommitMessage } from "./prompts";
+import {
+  formatVerificationFailure,
+  verifyChangedFiles,
+} from "./verify-branch";
+import {
+  checkBranchPreviewDeploy,
+  resolvePagesPreviewUrl,
+  isPreviewUrlLive,
+  waitForBranchPreviewDeploy,
+  type BranchDeployStatus,
+} from "./pages-preview";
 import { branchForSession } from "./preview-url";
 import {
+  checkMergeCooldown,
   checkRateLimit,
   getRun,
   getSession,
+  MERGE_COOLDOWN_MS,
   putRun,
   putSession,
+  setMergeCooldown,
   updateRun,
 } from "./session-store";
 import {
   isTerminalRunStatus,
   parseSsePart,
   runStatusMessage,
-  toolCallMessage,
+  statusToStep,
+  toolCallToStep,
 } from "./stream-transform";
 import type { ElementContextPayload, Env, RunRecord, SessionRecord } from "./types";
 
@@ -101,6 +124,24 @@ function clientIp(request: Request): string {
   return request.headers.get("CF-Connecting-IP") ?? "unknown";
 }
 
+function mergeCooldownMs(env: Env): number {
+  const raw = env.MERGE_COOLDOWN_MS;
+  if (raw) {
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isNaN(parsed) && parsed >= 60_000) return parsed;
+  }
+  return MERGE_COOLDOWN_MS;
+}
+
+function mergeCooldownResponse(retryAfterSeconds: number) {
+  return jsonError("merge_cooldown", 429, {
+    code: "merge_cooldown",
+    retryAfterSeconds,
+    message:
+      "You just merged a design. Wait before starting a new cloud agent — one agent per session.",
+  });
+}
+
 async function previewUrlForBranch(env: Env, branch: string): Promise<string> {
   return resolvePagesPreviewUrl({
     branch,
@@ -117,12 +158,100 @@ async function ensureSessionBranch(env: Env, branch: string): Promise<void> {
     );
   }
 
-  await ensureGitBranch(
+  const { created } = await ensureGitBranch(
     env.GITHUB_TOKEN,
     env.GITHUB_REPO_URL,
     branch,
     env.GITHUB_DEFAULT_BRANCH ?? "main",
   );
+
+  if (created) {
+    await mergeMainIntoBranch(
+      env.GITHUB_TOKEN,
+      env.GITHUB_REPO_URL,
+      branch,
+      env.GITHUB_DEFAULT_BRANCH ?? "main",
+    );
+  }
+}
+
+async function previewDeployForBranch(
+  env: Env,
+  branch: string,
+  waitForDeploy: boolean,
+): Promise<BranchDeployStatus> {
+  const options = {
+    branch,
+    projectName: env.PAGES_PROJECT_NAME || "popped-dev",
+    repoUrl: env.GITHUB_REPO_URL,
+    githubToken: env.GITHUB_TOKEN,
+  };
+
+  if (waitForDeploy && env.GITHUB_TOKEN) {
+    return waitForBranchPreviewDeploy(options);
+  }
+
+  return checkBranchPreviewDeploy(options);
+}
+
+async function verifyDesignBranch(
+  env: Env,
+  branch: string,
+): Promise<{ ok: boolean; message?: string; changedFiles: string[]; aheadBy: number }> {
+  if (!env.GITHUB_TOKEN) {
+    return { ok: true, changedFiles: [], aheadBy: 1 };
+  }
+
+  const baseRef = env.GITHUB_DEFAULT_BRANCH ?? "main";
+  const { aheadBy, changedFiles } = await listChangedFilesOnBranch(
+    env.GITHUB_TOKEN,
+    env.GITHUB_REPO_URL,
+    branch,
+    baseRef,
+  );
+  const result = verifyChangedFiles(changedFiles, aheadBy);
+  if (!result.ok) {
+    return {
+      ok: false,
+      message: formatVerificationFailure(result),
+      changedFiles,
+      aheadBy,
+    };
+  }
+  return { ok: true, changedFiles, aheadBy };
+}
+
+type PreviewFlags = {
+  previewEmitted: boolean;
+  previewReady: boolean;
+  assistantSent: boolean;
+};
+
+async function maybeEmitPreview(
+  env: Env,
+  branch: string,
+  emit: SseEmitter,
+  flags: PreviewFlags,
+): Promise<void> {
+  if (!branch || flags.previewEmitted) return;
+
+  const deploy = await previewDeployForBranch(env, branch, false);
+  flags.previewEmitted = true;
+  flags.previewReady = deploy.ready;
+
+  emit("preview", {
+    previewUrl: deploy.previewUrl,
+    branch,
+    ready: deploy.ready,
+    sha: deploy.sha,
+    progress: deploy.progress,
+    phase: deploy.phase,
+  });
+  emit("step", {
+    id: "deploy",
+    label: deploy.ready ? "Preview ready" : "Building preview",
+    state: deploy.ready ? "done" : "running",
+  });
 }
 
 type SseEmitter = (event: string, data: Record<string, unknown>) => void;
@@ -134,7 +263,7 @@ async function syncRunPreview(
   runId: string,
   projectName: string,
   emit: SseEmitter,
-  flags: { previewSent: boolean; assistantSent: boolean },
+  flags: PreviewFlags,
 ): Promise<string> {
   const run = await getCloudRun(apiKey, record.agentId, runId);
   const branch = extractBranch(run.git) ?? record.branch ?? undefined;
@@ -145,14 +274,9 @@ async function syncRunPreview(
     emit("assistant", { text: run.result });
   }
 
-  if (branch && !flags.previewSent) {
-    flags.previewSent = true;
-    const previewUrl = await previewUrlForBranch(env, branch);
-    emit("preview", {
-      previewUrl,
-      branch,
-    });
-    emit("status", { message: "Opening preview…" });
+  const terminal = isTerminalRunStatus(run.status);
+  if (terminal && run.status === "FINISHED" && branch) {
+    await maybeEmitPreview(env, branch, emit, flags);
   }
 
   await updateRun(env.SESSIONS, runId, {
@@ -189,8 +313,8 @@ function createPollRunStream(
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
-      const flags = { previewSent: false, assistantSent: false };
-      emit("status", { message: "Reconnecting to agent run…" });
+      const flags: PreviewFlags = { previewEmitted: false, previewReady: false, assistantSent: false };
+      emit("step", { id: "connect", label: "Reconnecting to agent", state: "running" });
 
       try {
         for (let attempt = 0; attempt < 90; attempt += 1) {
@@ -205,19 +329,27 @@ function createPollRunStream(
           );
 
           const friendly = runStatusMessage(status);
-          if (friendly && !isTerminalRunStatus(status)) {
+          const step = statusToStep(status);
+          if (step) {
+            emit("step", step);
+          } else if (friendly && !isTerminalRunStatus(status)) {
             emit("status", { message: friendly });
           }
 
           if (isTerminalRunStatus(status)) {
-            if (status === "ERROR") {
+            if (status === "FINISHED") {
+              const branch = record.branch;
+              if (branch) {
+                await maybeEmitPreview(env, branch, emit, flags);
+              }
+            } else if (status === "ERROR") {
               emit("error", { message: "Agent run failed." });
             }
             emit("done", {});
             break;
           }
 
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+          await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Could not load run status.";
@@ -238,7 +370,7 @@ function handleUpstreamSseEvent(
   eventType: string,
   payload: Record<string, unknown>,
   emit: SseEmitter,
-  flags: { previewSent: boolean; assistantSent: boolean },
+  flags: PreviewFlags,
   record: RunRecord,
   runId: string,
   projectName: string,
@@ -249,21 +381,25 @@ function handleUpstreamSseEvent(
     const text = typeof payload.text === "string" ? payload.text : "";
     if (text) {
       flags.assistantSent = true;
+      emit("step", { id: "connect", label: "Connected to agent", state: "done" });
       emit("assistant", { text });
     }
     return;
   }
 
   if (eventType === "thinking") {
-    const text = typeof payload.text === "string" ? payload.text : "";
-    if (text) {
-      emit("status", { message: "Thinking…" });
-    }
+    emit("step", { id: "think", label: "Planning changes", state: "running" });
     return;
   }
 
   if (eventType === "status") {
     const status = String(payload.status ?? "");
+    const step = statusToStep(status);
+    if (step && !seenStatus.has(status)) {
+      seenStatus.add(status);
+      emit("step", step);
+      return;
+    }
     const message = runStatusMessage(status);
     if (message && !seenStatus.has(status)) {
       seenStatus.add(status);
@@ -275,9 +411,9 @@ function handleUpstreamSseEvent(
   if (eventType === "tool_call") {
     const name = String(payload.name ?? "");
     const status = String(payload.status ?? "");
-    const message = toolCallMessage(name, status);
-    if (message) {
-      emit("status", { message });
+    const step = toolCallToStep(name, status);
+    if (step) {
+      emit("step", step);
     }
     return;
   }
@@ -291,18 +427,15 @@ function handleUpstreamSseEvent(
 
     const git = payload.git as { branches?: Array<{ branch?: string; prUrl?: string }> } | undefined;
     const branch = extractBranch(git) ?? record.branch ?? undefined;
-    if (branch && !flags.previewSent) {
-      flags.previewSent = true;
-      void (async () => {
-        const previewUrl = await previewUrlForBranch(env, branch);
-        emit("preview", { previewUrl, branch });
-        emit("status", { message: "Opening preview…" });
-        await updateRun(env.SESSIONS, runId, {
-          branch,
-          status: String(payload.status ?? ""),
-          prUrl: extractPrUrl(git) ?? undefined,
-        });
-      })();
+    const status = String(payload.status ?? "");
+    void updateRun(env.SESSIONS, runId, {
+      branch,
+      status,
+      prUrl: extractPrUrl(git) ?? undefined,
+    });
+
+    if (isTerminalRunStatus(status) && status === "FINISHED" && branch) {
+      void maybeEmitPreview(env, branch, emit, flags);
     }
     return;
   }
@@ -336,68 +469,52 @@ app.post("/api/agent/session", async (c) => {
       ? body.sessionId
       : crypto.randomUUID();
 
+  const cooldown = await checkMergeCooldown(c.env.SESSIONS, clientIp(c.req.raw));
+  if (!cooldown.allowed) {
+    return mergeCooldownResponse(cooldown.retryAfterSeconds);
+  }
+
   const existing = await getSession(c.env.SESSIONS, sessionId);
   if (existing) {
+    if (existing.protected || existing.mergedAt) {
+      return jsonError("session_merged", 409, {
+        code: "session_merged",
+        message: "This design session ended after merge. Start fresh with a new session.",
+      });
+    }
     return c.json({
       sessionId: existing.sessionId,
-      agentId: existing.agentId,
+      agentId: existing.agentId || null,
       branch: existing.branch,
       resumed: true,
     });
   }
 
   const branch = branchForSession(sessionId);
-  const prompt = `${buildDesignPrompt(
-    {
-      label: "SessionInit",
-      selectorPath: "#locked-resume",
-      tagName: "main",
-      classNames: [],
-      textPreview: "",
-      suggestedFiles: ["src/app/globals.css"],
-    },
-    "Initialize design session. Await element-specific requests.",
-    contributorName,
-  )}\n\nSession branch: ${branch}.`;
 
   try {
     await ensureSessionBranch(c.env, branch);
 
-    const created = await createCloudAgent(c.env.CURSOR_API_KEY, {
-      promptText: prompt,
-      branch,
-      repoUrl: c.env.GITHUB_REPO_URL,
-      autoCreatePR: false,
-    });
-
     const session: SessionRecord = {
       sessionId,
-      agentId: created.agent.id,
+      agentId: "",
       contributorName,
       branch,
       createdAt: Date.now(),
       lastRunAt: Date.now(),
-      runCount: 1,
+      runCount: 0,
     };
     await putSession(c.env.SESSIONS, session, cleanupTtlSeconds(c.env));
-    await putRun(c.env.SESSIONS, {
-      runId: created.run.id,
-      sessionId,
-      agentId: created.agent.id,
-      branch,
-      status: created.run.status,
-      createdAt: Date.now(),
-    }, cleanupTtlSeconds(c.env));
 
     return c.json({
       sessionId,
-      agentId: created.agent.id,
+      agentId: null,
       branch,
-      runId: created.run.id,
+      runId: null,
       resumed: false,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "agent_create_failed";
+    const message = error instanceof Error ? error.message : "session_init_failed";
     return jsonError(message, 502);
   }
 });
@@ -434,6 +551,11 @@ app.post("/api/agent/message", async (c) => {
       ? body.sessionId
       : crypto.randomUUID();
 
+  const cooldown = await checkMergeCooldown(c.env.SESSIONS, clientIp(c.req.raw));
+  if (!cooldown.allowed) {
+    return mergeCooldownResponse(cooldown.retryAfterSeconds);
+  }
+
   const rate = await checkRateLimit(c.env.SESSIONS, `${clientIp(c.req.raw)}:${sessionId}`);
   if (!rate.allowed) {
     return jsonError("rate_limit_exceeded", 429, {
@@ -442,13 +564,16 @@ app.post("/api/agent/message", async (c) => {
   }
 
   let session = await getSession(c.env.SESSIONS, sessionId);
+  if (session?.protected || session?.mergedAt) {
+    return jsonError("session_merged", 409, {
+      code: "session_merged",
+      message: "This design session ended after merge. Clear your session and start a new design.",
+    });
+  }
+
   if (!session) {
     const branch = branchForSession(sessionId);
-    const bootstrap = buildDesignPrompt(
-      elementContext,
-      message,
-      contributorName,
-    );
+    const bootstrap = buildDesignPrompt(elementContext, message, contributorName);
 
     try {
       await ensureSessionBranch(c.env, branch);
@@ -467,7 +592,8 @@ app.post("/api/agent/message", async (c) => {
         branch,
         createdAt: Date.now(),
         lastRunAt: Date.now(),
-        runCount: 0,
+        runCount: 1,
+        activeRunId: created.run.id,
       };
       await putSession(c.env.SESSIONS, session, cleanupTtlSeconds(c.env));
 
@@ -480,10 +606,6 @@ app.post("/api/agent/message", async (c) => {
         createdAt: Date.now(),
       };
       await putRun(c.env.SESSIONS, runRecord, cleanupTtlSeconds(c.env));
-
-      session.lastRunAt = Date.now();
-      session.runCount += 1;
-      await putSession(c.env.SESSIONS, session, cleanupTtlSeconds(c.env));
 
       return c.json({
         sessionId,
@@ -500,7 +622,46 @@ app.post("/api/agent/message", async (c) => {
   const prompt = buildDesignPrompt(elementContext, message, contributorName);
 
   try {
-    const created = await createCloudRun(c.env.CURSOR_API_KEY, session.agentId, prompt);
+    await ensureSessionBranch(c.env, session.branch);
+
+    if (!session.agentId) {
+      const created = await createCloudAgent(c.env.CURSOR_API_KEY, {
+        promptText: prompt,
+        branch: session.branch,
+        repoUrl: c.env.GITHUB_REPO_URL,
+        autoCreatePR: false,
+      });
+
+      session.agentId = created.agent.id;
+      session.activeRunId = created.run.id;
+      session.lastRunAt = Date.now();
+      session.runCount += 1;
+      session.contributorName = contributorName;
+      await putSession(c.env.SESSIONS, session, cleanupTtlSeconds(c.env));
+
+      await putRun(c.env.SESSIONS, {
+        runId: created.run.id,
+        sessionId: session.sessionId,
+        agentId: created.agent.id,
+        branch: session.branch,
+        status: created.run.status,
+        createdAt: Date.now(),
+      }, cleanupTtlSeconds(c.env));
+
+      return c.json({
+        sessionId: session.sessionId,
+        agentId: created.agent.id,
+        runId: created.run.id,
+        branch: session.branch,
+      });
+    }
+
+    const created = await createCloudRunWhenReady(
+      c.env.CURSOR_API_KEY,
+      session.agentId,
+      prompt,
+    );
+
     await putRun(c.env.SESSIONS, {
       runId: created.run.id,
       sessionId: session.sessionId,
@@ -510,6 +671,7 @@ app.post("/api/agent/message", async (c) => {
       createdAt: Date.now(),
     }, cleanupTtlSeconds(c.env));
 
+    session.activeRunId = created.run.id;
     session.lastRunAt = Date.now();
     session.runCount += 1;
     session.contributorName = contributorName;
@@ -522,8 +684,23 @@ app.post("/api/agent/message", async (c) => {
       branch: session.branch,
     });
   } catch (error) {
+    if (session.agentId && isAgentBusyError(error)) {
+      const active = await getActiveRun(c.env.CURSOR_API_KEY, session.agentId);
+      if (active) {
+        return c.json({
+          sessionId: session.sessionId,
+          agentId: session.agentId,
+          runId: active.id,
+          branch: session.branch,
+          attachedToActiveRun: true,
+        });
+      }
+    }
+
     const msg = error instanceof Error ? error.message : "run_create_failed";
-    return jsonError(msg, 502);
+    return jsonError(msg, isAgentBusyError(error) ? 409 : 502, {
+      code: isAgentBusyError(error) ? "agent_busy" : undefined,
+    });
   }
 });
 
@@ -534,9 +711,20 @@ app.get("/api/agent/preview", async (c) => {
   }
 
   try {
-    const previewUrl = await previewUrlForBranch(c.env, branch);
-    const ready = await isPreviewUrlLive(previewUrl);
-    return c.json({ branch, previewUrl, ready });
+    const deployed = await checkBranchPreviewDeploy({
+      branch,
+      projectName: c.env.PAGES_PROJECT_NAME || "popped-dev",
+      repoUrl: c.env.GITHUB_REPO_URL,
+      githubToken: c.env.GITHUB_TOKEN,
+    });
+    return c.json({
+      branch,
+      previewUrl: deployed.previewUrl,
+      ready: deployed.ready,
+      sha: deployed.sha,
+      progress: deployed.progress,
+      phase: deployed.phase,
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : "preview_resolve_failed";
     return jsonError(message, 502);
@@ -553,14 +741,51 @@ app.get("/api/agent/runs/:runId", async (c) => {
   try {
     const run = await getCloudRun(c.env.CURSOR_API_KEY, record.agentId, runId);
     const branch = extractBranch(run.git) ?? record.branch ?? undefined;
-    const previewUrl = branch ? await previewUrlForBranch(c.env, branch) : undefined;
     const prUrl = extractPrUrl(run.git);
+    const terminal = isTerminalRunStatus(run.status);
+    let previewUrl: string | undefined;
+    let previewReady = false;
+    let previewSha: string | null = null;
+
+    let previewProgress = 0;
+    let previewPhase: string | undefined;
+
+    if (branch) {
+      const deployed = await previewDeployForBranch(c.env, branch, false);
+      previewUrl = deployed.previewUrl;
+      previewReady = deployed.ready;
+      previewSha = deployed.sha;
+      previewProgress = deployed.progress;
+      previewPhase = deployed.phase;
+
+      if (terminal && run.status === "FINISHED" && !previewReady && c.env.GITHUB_TOKEN) {
+        const waited = await checkBranchPreviewDeploy({
+          branch,
+          projectName: c.env.PAGES_PROJECT_NAME || "popped-dev",
+          repoUrl: c.env.GITHUB_REPO_URL,
+          githubToken: c.env.GITHUB_TOKEN,
+        });
+        previewUrl = waited.previewUrl;
+        previewReady = waited.ready;
+        previewSha = waited.sha;
+        previewProgress = waited.progress;
+        previewPhase = waited.phase;
+      }
+    }
 
     await updateRun(c.env.SESSIONS, runId, {
       status: run.status,
       branch,
       prUrl: prUrl ?? undefined,
     });
+
+    if (terminal) {
+      const sessionRecord = await getSession(c.env.SESSIONS, record.sessionId);
+      if (sessionRecord?.activeRunId === runId) {
+        sessionRecord.activeRunId = undefined;
+        await putSession(c.env.SESSIONS, sessionRecord, cleanupTtlSeconds(c.env));
+      }
+    }
 
     return c.json({
       runId: run.id,
@@ -569,8 +794,12 @@ app.get("/api/agent/runs/:runId", async (c) => {
       result: run.result ?? null,
       branch,
       previewUrl,
+      previewReady,
+      previewSha,
+      previewProgress,
+      previewPhase,
       prUrl,
-      done: isTerminalRunStatus(run.status),
+      done: terminal,
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "run_fetch_failed";
@@ -615,7 +844,7 @@ app.get("/api/agent/runs/:runId/stream", async (c) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
-      const flags = { previewSent: false, assistantSent: false };
+      const flags: PreviewFlags = { previewEmitted: false, previewReady: false, assistantSent: false };
       const seenStatus = new Set<string>();
 
       try {
@@ -696,35 +925,76 @@ app.post("/api/agent/runs/:runId/submit", async (c) => {
     return jsonError("session_not_found", 404);
   }
 
+  if (!c.env.GITHUB_TOKEN) {
+    return jsonError("github_token_required", 503);
+  }
+
   const body = (await c.req.json().catch(() => ({}))) as {
     contributorName?: string;
-    prTitle?: string;
   };
 
   const contributorName =
     requireContributorName(body.contributorName) ?? session.contributorName;
-  const prompt = buildSubmitPrompt(contributorName, session.branch, body.prTitle);
+  const baseRef = c.env.GITHUB_DEFAULT_BRANCH ?? "main";
+  const branch = session.branch;
+  const mergeMessage = buildMergeCommitMessage(contributorName, branch);
 
   try {
+    const verification = await verifyDesignBranch(c.env, branch);
+    if (!verification.ok) {
+      return jsonError(verification.message ?? "branch_verification_failed", 409, {
+        changedFiles: verification.changedFiles,
+      });
+    }
+
+    await mergeMainIntoBranch(
+      c.env.GITHUB_TOKEN,
+      c.env.GITHUB_REPO_URL,
+      branch,
+      baseRef,
+    );
+
+    await appendContributionEntry(
+      c.env.GITHUB_TOKEN,
+      c.env.GITHUB_REPO_URL,
+      branch,
+      contributorName,
+    );
+
+    const mergeCommitUrl = await mergeBranchIntoBase(
+      c.env.GITHUB_TOKEN,
+      c.env.GITHUB_REPO_URL,
+      branch,
+      baseRef,
+      mergeMessage,
+    );
+
+    try {
+      await deleteGitBranch(c.env.GITHUB_TOKEN, c.env.GITHUB_REPO_URL, branch);
+    } catch (deleteError) {
+      console.warn("Design branch cleanup after merge failed:", deleteError);
+    }
+
     session.protected = true;
+    session.mergedAt = Date.now();
     session.lastRunAt = Date.now();
     await putSession(c.env.SESSIONS, session, cleanupTtlSeconds(c.env));
 
-    const created = await createCloudRun(c.env.CURSOR_API_KEY, session.agentId, prompt);
-    await putRun(c.env.SESSIONS, {
-      runId: created.run.id,
-      sessionId: session.sessionId,
-      agentId: session.agentId,
-      branch: session.branch,
-      status: created.run.status,
-      createdAt: Date.now(),
-    }, cleanupTtlSeconds(c.env));
+    await setMergeCooldown(
+      c.env.SESSIONS,
+      clientIp(c.req.raw),
+      mergeCooldownMs(c.env),
+    );
+
+    await updateRun(c.env.SESSIONS, runId, { mergeCommitUrl, branch, prUrl: undefined });
 
     return c.json({
-      runId: created.run.id,
+      runId,
       agentId: session.agentId,
-      branch: session.branch,
-      message: "submit_run_started",
+      branch,
+      mergeCommitUrl,
+      message: "merged_to_main",
+      cooldownSeconds: Math.ceil(mergeCooldownMs(c.env) / 1000),
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "submit_failed";

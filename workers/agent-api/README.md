@@ -10,14 +10,14 @@ Cloudflare Worker that orchestrates Cursor cloud agents for the popped.dev desig
 | `POST /api/agent/message` | Send user message + element context; returns `runId` |
 | `GET /api/agent/runs/:runId/stream` | SSE: assistant text, status, `previewUrl` |
 | `GET /api/agent/runs/:runId` | Poll fallback |
-| `POST /api/agent/runs/:runId/submit` | Phase 3: follow-up run to open a PR |
+| `POST /api/agent/runs/:runId/submit` | Merge design branch to `main` + attribution |
 
 Implementation uses the [Cursor Cloud Agents REST API](https://cursor.com/docs/cloud-agent/api/endpoints) (`fetch` to `api.cursor.com`) for Worker compatibility. Same repo settings as `@cursor/sdk` cloud agents.
 
 - **Repo:** `https://github.com/parse-nip/popped-dev`
 - **Branch:** `cursor/design/{sessionId}` (`workOnCurrentBranch: true`)
 - **Phase 2:** `autoCreatePR: false` on create
-- **Phase 3:** submit endpoint sends a follow-up prompt to open a PR
+- **Phase 3:** submit endpoint merges the design branch to `main` via GitHub API
 
 System prompts embed `AGENTS.md` rules (facts from `experience.json` only, style `LockedResume.tsx` / `globals.css`, never edit locked files).
 
@@ -57,7 +57,7 @@ Set via `wrangler secret put` or the Cloudflare dashboard:
 | Name | Required | Description |
 |---|---|---|
 | `CURSOR_API_KEY` | Yes | Cursor team service-account API key |
-| `GITHUB_TOKEN` | Yes | GitHub PAT with `contents: write` to create `cursor/design/*` branches before agent start |
+| `GITHUB_TOKEN` | Yes | GitHub PAT with **Contents: read and write** on `parse-nip/popped-dev` (merge + branches; no PR scope needed) |
 | `SESSIONS` KV | Yes | Session + run metadata + rate limits |
 
 `wrangler.toml` vars (override in dashboard if needed):
@@ -102,6 +102,7 @@ See [`docs/TESTING-AND-RESET.md`](../../docs/TESTING-AND-RESET.md) and `scripts/
 
 - Contributor name required (matches `popped.dev:contributor-name` in localStorage)
 - Rate limit: 5 runs/hour per IP + session (KV)
+- **Merge cooldown:** 30 minutes per IP after publishing — blocks new cloud agents (one agent per Cursor chat)
 - `CURSOR_API_KEY` never sent to the browser
 
 ## Automatic cleanup
@@ -136,5 +137,5 @@ Manual reset still available via `scripts/reset-test-state.sh`.
 1. `wrangler dev` + Next dev with `NEXT_PUBLIC_AGENT_API_URL`
 2. Design mode → select resume heading → send chat message
 3. Agent pushes branch → Pages preview builds → iframe shows changes
-4. Submit for review → PR link in modal
+4. Publish → merge to main → live site rebuilds
 5. `npm run verify:locked` passes on PR branch
