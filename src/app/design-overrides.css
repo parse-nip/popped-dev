@@ -2,3 +2,19 @@
  * Community design overrides — appended at publish time.
  * Do not edit locked facts; CSS-only presentation changes scoped to data-design-id.
  */
+
+/* popped.design:start id=patch_hero.title_mqiyynvx */
+[data-design-id="hero.title"] { text-align: center; }
+/* popped.design:end id=patch_hero.title_mqiyynvx */
+
+/* popped.design:start id=patch_hero.tagline_mqiyz3ny */
+[data-design-id="hero.tagline"] { text-align: center; }
+/* popped.design:end id=patch_hero.tagline_mqiyz3ny */
+
+/* popped.design:start id=patch_hero.links_mqiyzf3i */
+[data-design-id="hero.links"] { text-align: center; }
+/* popped.design:end id=patch_hero.links_mqiyzf3i */
+
+/* popped.design:start id=patch_hero.link.0_mqiz17mw */
+[data-design-id="hero.link.0"] { transition: color 0.2s ease; }
+/* popped.design:end id=patch_hero.link.0_mqiz17mw */
