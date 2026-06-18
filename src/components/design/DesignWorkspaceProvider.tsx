@@ -24,7 +24,6 @@ import {
   bootWebContainer,
   exportChangedFiles,
   installDependencies,
-  isCrossOriginIsolated,
   listTrackedFiles,
   mountProjectFiles,
   pickContextFiles,
@@ -62,7 +61,7 @@ function stripAnsi(text: string): string {
 }
 
 export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
-  const { isDesignMode, setMode } = useDesignMode();
+  const { isDesignMode } = useDesignMode();
   const [status, setStatus] = useState<DesignWorkspaceStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -109,10 +108,6 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
 
     bootPromiseRef.current = (async () => {
       try {
-        if (!isCrossOriginIsolated()) {
-          throw new Error("Design mode is unavailable in this browser context.");
-        }
-
         setStatus("booting");
         setError(null);
         resetPreviewSignals();
@@ -141,12 +136,12 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
           bootError instanceof Error ? bootError.message : "Design mode unavailable.";
         setError(message);
         setStatus("build_error");
-        setMode("browse");
+        // Keep design mode on so the status bar shows the error message.
       }
     })();
 
     return bootPromiseRef.current;
-  }, [appendLog, previewUrl, resetPreviewSignals, setMode]);
+  }, [appendLog, previewUrl, resetPreviewSignals]);
 
   useEffect(() => {
     if (isDesignMode) {

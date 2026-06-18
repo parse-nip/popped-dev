@@ -2,6 +2,11 @@ import type { WebContainer } from "@webcontainer/api";
 import type { FileSystemTree } from "@webcontainer/api";
 import { computeFileChanges } from "./diff";
 import type { FileChange } from "./types";
+import {
+  canAttemptDesignBoot,
+  detectCoepMode,
+  getDesignModeBlockReason,
+} from "./design-support";
 
 let webcontainerPromise: Promise<WebContainer> | null = null;
 let webcontainerInstance: WebContainer | null = null;
@@ -61,7 +66,13 @@ export async function bootWebContainer(): Promise<WebContainer> {
 
   webcontainerPromise = (async () => {
     const { WebContainer } = await import("@webcontainer/api");
-    webcontainerInstance = await WebContainer.boot();
+
+    const coep = detectCoepMode();
+    if (coep === "none" || !canAttemptDesignBoot()) {
+      throw new Error(getDesignModeBlockReason());
+    }
+
+    webcontainerInstance = await WebContainer.boot({ coep });
     return webcontainerInstance;
   })();
 
@@ -256,6 +267,4 @@ export function pickContextFiles(
   return picked;
 }
 
-export function isCrossOriginIsolated(): boolean {
-  return typeof crossOriginIsolated !== "undefined" && crossOriginIsolated;
-}
+export { isCrossOriginIsolated } from "./design-support";
