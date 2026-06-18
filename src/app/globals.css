@@ -1491,6 +1491,7 @@
   }
 
   #locked-resume h1 {
+    font-family: Papyrus, fantasy;
     font-size: 2em;
     margin: 0 0 0.5em;
   }
@@ -1520,6 +1521,28 @@
 
   #locked-resume a {
     color: inherit;
+  }
+
+  #locked-resume .locked-resume-links {
+    color: var(--color-text-secondary);
+    font-size: 0.9375rem;
+  }
+
+  #locked-resume .locked-resume-links a {
+    color: var(--color-accent-blue-text);
+    text-decoration: underline;
+    text-decoration-color: rgba(49, 95, 220, 0.35);
+    text-underline-offset: 0.15em;
+    cursor: pointer;
+    transition:
+      color 120ms ease,
+      text-decoration-color 120ms ease;
+  }
+
+  #locked-resume .locked-resume-links a:hover,
+  #locked-resume .locked-resume-links a:focus-visible {
+    color: #2449b8;
+    text-decoration-color: currentColor;
   }
 
   .design-select-overlay {

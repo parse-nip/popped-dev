@@ -17,13 +17,21 @@ export function LockedResume() {
       aria-label="Portfolio facts"
     >
       <header data-design-id="hero.header">
-        <h1 data-design-id="hero.title" data-fact-id="profile-name">
+        <h1
+          data-design-id="hero.title"
+          data-fact-id="profile-name"
+          data-contribution-id="profile-name-papyrus"
+        >
           {data.profile.name}
         </h1>
         <p data-design-id="hero.tagline" data-fact-id="profile-tagline">
           {data.profile.tagline}
         </p>
-        <p data-design-id="hero.links">
+        <p
+          className="locked-resume-links"
+          data-design-id="hero.links"
+          data-contribution-id="profile-links"
+        >
           {data.profile.links.map((link, i) => (
             <span key={link.href}>
               {i > 0 ? " · " : null}
@@ -31,6 +39,7 @@ export function LockedResume() {
                 href={link.href}
                 data-design-id={`hero.link.${i}`}
                 data-fact-id={`profile-link-${i}`}
+                data-contribution-id="profile-links"
                 target="_blank"
                 rel="noopener noreferrer"
               >
