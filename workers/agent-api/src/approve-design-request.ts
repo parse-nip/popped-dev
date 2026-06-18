@@ -85,6 +85,8 @@ APPROVE visual changes: colors, fonts, spacing, layout, borders, backgrounds, da
 
 APPROVE functional changes that improve the portfolio UI: new links, buttons, navigation, hover states, click handlers, reordering sections, adding components, tooltips, external links, GitHub/social link rows, layout structure, accessibility tweaks, and interactive elements — as long as they don't rewrite locked resume facts.
 
+APPROVE ambitious portfolio features: mini-games, interactive widgets, animations, calculators, theme switchers, modals, sidebars, particle effects, 3D visuals, and full UI rebuilds — as long as locked resume facts are not rewritten.
+
 APPROVE decorative and brand visuals: icons, emojis, logos, SVG graphics, favicons, avatars, and images — via inline SVG, img tags, Unicode emoji in TSX, files under public/assets/, or HTTPS CDN URLs (e.g. https://cdn.simpleicons.org/github/111111).
 
 APPROVE using existing resume facts from src/locked/experience.json in new UI (read-only display, link rows, skill chips, project highlights) — but NOT editing the JSON facts themselves.

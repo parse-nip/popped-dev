@@ -6,20 +6,23 @@ const BOOTSTRAP_PATHS = [
   "src/app/page.tsx",
   "src/app/globals.css",
   "src/app/design-overrides.css",
+  "src/components/HomeShell.tsx",
   "src/components/SiteHeader.tsx",
   "src/components/community/CommunityChrome.tsx",
   "src/components/locked/LockedResume.tsx",
   "src/locked/experience.json",
   "shared/editable-workspace-paths.ts",
+  "shared/bolt-action-parser.ts",
+  "shared/agent-edit-prompts.ts",
   "workers/agent-api/src/index.ts",
   "workers/agent-api/src/agent-edit.ts",
   "workers/agent-api/src/project-files.ts",
   "workers/agent-api/package.json",
 ];
 
-const PRIORITY_MAX_CHARS = 16_000;
-const DEFAULT_MAX_CHARS = 10_000;
-const TOTAL_CHAR_BUDGET = 400_000;
+const PRIORITY_MAX_CHARS = 20_000;
+const DEFAULT_MAX_CHARS = 12_000;
+const TOTAL_CHAR_BUDGET = 500_000;
 
 function truncateContent(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content;
@@ -47,6 +50,42 @@ function orderEditablePaths(
   }
 
   return ordered;
+}
+
+/** Compact directory tree for agent context (bolt.new-style project awareness). */
+export function buildProjectTreeSummary(files: Record<string, string>): string {
+  const paths = Object.keys(files)
+    .filter(isEditableWorkspacePath)
+    .sort((a, b) => a.localeCompare(b));
+
+  const dirs = new Set<string>();
+  for (const path of paths) {
+    const parts = path.split("/");
+    for (let i = 1; i < parts.length; i += 1) {
+      dirs.add(parts.slice(0, i).join("/"));
+    }
+  }
+
+  const lines: string[] = [`${paths.length} editable files`];
+
+  const topLevel = new Set(paths.map((p) => p.split("/")[0]));
+  for (const dir of [...topLevel].sort()) {
+    const count = paths.filter((p) => p.startsWith(`${dir}/`) || p === dir).length;
+    lines.push(`  ${dir}/ (${count} files)`);
+  }
+
+  const community = paths.filter((p) => p.startsWith("src/components/community/"));
+  if (community.length > 0) {
+    lines.push("  community components:");
+    for (const path of community.slice(0, 24)) {
+      lines.push(`    - ${path.split("/").pop()}`);
+    }
+    if (community.length > 24) {
+      lines.push(`    … +${community.length - 24} more`);
+    }
+  }
+
+  return lines.join("\n");
 }
 
 /** Full editable workspace context for the design agent (truncated to fit model limits). */
@@ -86,6 +125,10 @@ export function orderAgentContextPaths(
     if (b === sourceFile) return 1;
     if (a === "package.json") return -1;
     if (b === "package.json") return 1;
+    if (a === "src/components/community/CommunityChrome.tsx") return -1;
+    if (b === "src/components/community/CommunityChrome.tsx") return 1;
+    if (a === "src/components/HomeShell.tsx") return -1;
+    if (b === "src/components/HomeShell.tsx") return 1;
     if (a === "src/app/layout.tsx") return -1;
     if (b === "src/app/layout.tsx") return 1;
     return a.localeCompare(b);
