@@ -23,7 +23,7 @@ import type { DesignWorkspaceStatus, EditEvent, FileChange } from "@/design/type
 import {
   bootWebContainer,
   exportChangedFiles,
-  installDependencies,
+  installDependenciesForWebContainer,
   listTrackedFiles,
   mountProjectFiles,
   pickContextFiles,
@@ -122,7 +122,12 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
         originalFilesRef.current = await mountProjectFiles(container, project.files);
 
         setStatus("installing");
-        const installCode = await installDependencies(container, appendLog);
+        const packageJson = project.files["package.json"] ?? "{}";
+        const installCode = await installDependenciesForWebContainer(
+          container,
+          packageJson,
+          appendLog,
+        );
         if (installCode !== 0) {
           throw new Error(`npm install failed (exit ${installCode})`);
         }

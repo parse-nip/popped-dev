@@ -7,14 +7,13 @@ import {
   detectCoepMode,
   getDesignModeBlockReason,
 } from "./design-support";
+import { patchPackageJsonForWebContainer } from "./patch-project-for-webcontainer";
 
 let webcontainerPromise: Promise<WebContainer> | null = null;
 let webcontainerInstance: WebContainer | null = null;
 
 const TRACKED_PREFIXES = ["src/", "public/", "shared/", "src/app/design-overrides.css"];
 const TRACKED_ROOT_FILES = new Set([
-  "package.json",
-  "package-lock.json",
   "next.config.ts",
   "tsconfig.json",
   "postcss.config.mjs",
@@ -83,16 +82,39 @@ export async function mountProjectFiles(
   container: WebContainer,
   files: Record<string, string>,
 ): Promise<Record<string, string>> {
-  const tree = flatFilesToTree(files);
+  const mountable = { ...files };
+  delete mountable["package-lock.json"];
+
+  const tree = flatFilesToTree(mountable);
   await container.mount(tree);
 
   const originalFiles: Record<string, string> = {};
   for (const [path, content] of Object.entries(files)) {
-    if (shouldTrackPath(path)) {
+    if (shouldTrackPath(path) && path !== "package-lock.json") {
       originalFiles[path] = content;
     }
   }
   return originalFiles;
+}
+
+/** Install deps with a WebContainer-compatible Next.js version, then restore package.json. */
+export async function installDependenciesForWebContainer(
+  container: WebContainer,
+  originalPackageJson: string,
+  onOutput?: (chunk: string) => void,
+): Promise<number> {
+  await writeFile(container, "package.json", patchPackageJsonForWebContainer(originalPackageJson));
+
+  try {
+    await container.fs.rm("package-lock.json");
+  } catch {
+    // optional
+  }
+
+  const code = await installDependencies(container, onOutput);
+
+  await writeFile(container, "package.json", originalPackageJson);
+  return code;
 }
 
 export async function installDependencies(
@@ -128,8 +150,15 @@ export async function startDevServer(
     });
   });
 
-  // Turbopack needs native bindings unavailable in WebContainer — use Webpack.
-  const process = await container.spawn("npm", ["run", "dev:webpack"]);
+  // Use the Next version installed in node_modules (15.4.x for WebContainer compatibility).
+  const process = await container.spawn("npx", [
+    "next",
+    "dev",
+    "--hostname",
+    "0.0.0.0",
+    "--port",
+    "3000",
+  ]);
   process.output.pipeTo(
     new WritableStream({
       write(chunk) {
