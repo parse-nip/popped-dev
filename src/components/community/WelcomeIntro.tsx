@@ -3,7 +3,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { ATTRIBUTION_KEY } from "@/components/locked/LockedIntro";
-import { writeContributorName } from "@/lib/contributor-name";
+import { contributorNameErrorMessage, validateContributorName, writeContributorName } from "@/lib/contributor-name";
 import { Input } from "@/components/ui/input";
 import { DesignSwitchPreview } from "@/components/community/DesignSwitchPreview";
 
@@ -63,20 +63,18 @@ function readStoredName(): string {
   return localStorage.getItem(ATTRIBUTION_KEY) ?? "";
 }
 
-function persistContributorName(name: string) {
-  writeContributorName(name);
-}
-
 type WelcomeStepVariant = "boundary" | "design" | "contributions" | "github" | "name";
 
 function StepVisual({
   variant,
   name,
   onNameChange,
+  nameError,
 }: {
   variant?: WelcomeStepVariant;
   name: string;
   onNameChange: (value: string) => void;
+  nameError?: string | null;
 }) {
   if (variant === "boundary") {
     return (
@@ -161,8 +159,16 @@ function StepVisual({
           value={name}
           onChange={(e) => onNameChange(e.target.value)}
           className="locked-intro-input"
+          aria-invalid={Boolean(nameError)}
+          aria-describedby={nameError ? "contributor-name-error" : undefined}
         />
-        <p className="locked-intro-helper">Shown with your contributions after merge.</p>
+        {nameError ? (
+          <p id="contributor-name-error" className="contributor-name-error" role="alert">
+            {nameError}
+          </p>
+        ) : (
+          <p className="locked-intro-helper">Shown with your contributions after merge.</p>
+        )}
       </div>
     );
   }
@@ -192,6 +198,7 @@ function WelcomeIntroDialog() {
   const [open, setOpen] = useState(() => !readWelcomeDismissed());
   const [stepIndex, setStepIndex] = useState(0);
   const [name, setName] = useState(readStoredName);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   const step = STEPS[stepIndex];
   const isFirstStep = stepIndex === 0;
@@ -212,15 +219,28 @@ function WelcomeIntroDialog() {
   }
 
   function handleContinue() {
-    persistContributorName(name);
+    const result = writeContributorName(name);
+    if (!result.ok) {
+      setNameError(contributorNameErrorMessage(result.error));
+      return;
+    }
+
+    setNameError(null);
     dismissWelcome();
   }
 
   function handleNext() {
     if (isLastStep) {
+      const validation = validateContributorName(name);
+      if (!validation.ok) {
+        setNameError(contributorNameErrorMessage(validation.error));
+        return;
+      }
+
       handleContinue();
       return;
     }
+    setNameError(null);
     setStepIndex((current) => Math.min(current + 1, STEPS.length - 1));
   }
 
@@ -269,7 +289,15 @@ function WelcomeIntroDialog() {
           <h2 className="welcome-steps-title">{step.title}</h2>
           <p className="welcome-steps-body">{step.body}</p>
 
-          <StepVisual variant={"variant" in step ? step.variant : undefined} name={name} onNameChange={setName} />
+          <StepVisual
+            variant={"variant" in step ? step.variant : undefined}
+            name={name}
+            onNameChange={(value) => {
+              setName(value);
+              setNameError(null);
+            }}
+            nameError={nameError}
+          />
         </div>
 
         <footer className="welcome-start-footer">

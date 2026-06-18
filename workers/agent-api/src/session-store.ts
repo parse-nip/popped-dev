@@ -91,29 +91,33 @@ export async function updateRun(
 }
 
 const RATE_LIMIT_MAX = 5;
+const DESIGN_RATE_PREFIX = "design-ratelimit:";
+const DESIGN_RATE_LIMIT_MAX = 60;
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 
 export type RateLimitResult =
   | { allowed: true; remaining: number }
   | { allowed: false; retryAfterSeconds: number };
 
-export async function checkRateLimit(
+async function consumeRateLimit(
   kv: KVNamespace,
+  prefix: string,
   key: string,
+  max: number,
 ): Promise<RateLimitResult> {
   const now = Date.now();
-  const record = await kv.get<RateLimitRecord>(`${RATE_PREFIX}${key}`, "json");
+  const record = await kv.get<RateLimitRecord>(`${prefix}${key}`, "json");
 
   if (!record || now - record.windowStart >= RATE_LIMIT_WINDOW_MS) {
     await kv.put(
-      `${RATE_PREFIX}${key}`,
+      `${prefix}${key}`,
       JSON.stringify({ count: 1, windowStart: now } satisfies RateLimitRecord),
       { expirationTtl: 3600 },
     );
-    return { allowed: true, remaining: RATE_LIMIT_MAX - 1 };
+    return { allowed: true, remaining: max - 1 };
   }
 
-  if (record.count >= RATE_LIMIT_MAX) {
+  if (record.count >= max) {
     const retryAfterSeconds = Math.ceil(
       (record.windowStart + RATE_LIMIT_WINDOW_MS - now) / 1000,
     );
@@ -121,8 +125,24 @@ export async function checkRateLimit(
   }
 
   const next: RateLimitRecord = { count: record.count + 1, windowStart: record.windowStart };
-  await kv.put(`${RATE_PREFIX}${key}`, JSON.stringify(next), { expirationTtl: 3600 });
-  return { allowed: true, remaining: RATE_LIMIT_MAX - next.count };
+  await kv.put(`${prefix}${key}`, JSON.stringify(next), { expirationTtl: 3600 });
+  return { allowed: true, remaining: max - next.count };
+}
+
+/** Cursor cloud agent runs — keep strict. */
+export async function checkRateLimit(
+  kv: KVNamespace,
+  key: string,
+): Promise<RateLimitResult> {
+  return consumeRateLimit(kv, RATE_PREFIX, key, RATE_LIMIT_MAX);
+}
+
+/** Local CSS patch runs — cheap Workers AI, allow more prompts per hour. */
+export async function checkDesignRateLimit(
+  kv: KVNamespace,
+  key: string,
+): Promise<RateLimitResult> {
+  return consumeRateLimit(kv, DESIGN_RATE_PREFIX, key, DESIGN_RATE_LIMIT_MAX);
 }
 
 export type CooldownResult =

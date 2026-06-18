@@ -20,9 +20,15 @@ export function YourChangesTab() {
   const [baseSha, setBaseSha] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
+  const isDeploying = state.publishStatus === "deploying";
+  const isDeployed = state.publishStatus === "deployed";
+
   const hasChanges =
     state.pendingPatch !== null ||
     state.acceptedPatches.length > 0 ||
+    state.deployHoldPatches.length > 0 ||
+    isDeploying ||
+    isDeployed ||
     state.publishStatus === "published";
 
   useEffect(() => {
@@ -64,17 +70,20 @@ export function YourChangesTab() {
 
     try {
       const sha = baseSha ?? (await fetchDesignBaseSha());
+      const patches = [...state.acceptedPatches];
       const result = await publishDesignPatches({
-        acceptedPatches: state.acceptedPatches,
+        acceptedPatches: patches,
         baseSha: sha,
       });
-      finishPublish(result.commitUrl);
+      finishPublish(result.commitUrl, result.commitSha, patches);
       setOpen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Publish failed.";
       setPublishStatus("failed", null, message);
     }
   }
+
+  const holdCount = state.deployHoldPatches.length;
 
   return (
     <div
@@ -139,13 +148,23 @@ export function YourChangesTab() {
           <p className="your-changes-publish-error">{state.publishError}</p>
         ) : null}
 
-        {state.publishStatus === "published" && state.publishUrl ? (
+        {isDeploying && state.publishUrl ? (
           <p className="your-changes-publish-success">
             Published —{" "}
             <a href={state.publishUrl} target="_blank" rel="noreferrer">
               view on GitHub
             </a>
-            . Cloudflare will deploy shortly.
+            . Waiting for popped.dev to go live
+            {holdCount > 0 ? ` (keeping ${holdCount} patch${holdCount === 1 ? "" : "es"} visible)` : ""}…
+          </p>
+        ) : null}
+
+        {isDeployed && state.publishUrl ? (
+          <p className="your-changes-publish-success">
+            Live on popped.dev —{" "}
+            <a href={state.publishUrl} target="_blank" rel="noreferrer">
+              view commit
+            </a>
           </p>
         ) : null}
 
@@ -156,7 +175,8 @@ export function YourChangesTab() {
             disabled={
               state.acceptedPatches.length === 0 ||
               state.publishStatus === "publishing" ||
-              state.publishStatus === "published"
+              isDeploying ||
+              isDeployed
             }
             onClick={() => {
               void handlePublish();
@@ -164,7 +184,9 @@ export function YourChangesTab() {
           >
             {state.publishStatus === "publishing"
               ? "Publishing…"
-              : `Publish ${state.acceptedPatches.length} patch${state.acceptedPatches.length === 1 ? "" : "es"}`}
+              : isDeploying
+                ? "Deploying…"
+                : `Publish ${state.acceptedPatches.length} patch${state.acceptedPatches.length === 1 ? "" : "es"}`}
           </Button>
           {!isDesignMode ? (
             <button

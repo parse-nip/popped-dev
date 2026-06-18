@@ -35,9 +35,11 @@ import {
 import { branchForSession } from "./preview-url";
 import { resolveBranchDraft } from "./draft";
 import { classifyRequiresCodeChange, generateDesignPatch } from "./design-run";
+import { checkProductionDeploy } from "./design-deploy";
 import { getMainHeadSha, publishWithAttribution } from "./design-publish";
 import { validatePatch, type DesignPatch } from "./design-patch";
 import {
+  checkDesignRateLimit,
   checkMergeCooldown,
   checkRateLimit,
   getRun,
@@ -56,6 +58,7 @@ import {
   toolCallToStep,
 } from "./stream-transform";
 import type { ElementContextPayload, Env, RunRecord, SessionRecord } from "./types";
+import { validateContributorName } from "../../../shared/contributor-name-validation";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -86,10 +89,19 @@ app.use(
   }),
 );
 
-function requireContributorName(name: unknown): string | null {
-  if (typeof name !== "string") return null;
-  const trimmed = name.trim();
-  return trimmed.length >= 2 && trimmed.length <= 80 ? trimmed : null;
+function parseContributorName(name: unknown):
+  | { ok: true; name: string }
+  | { ok: false; code: "contributor_name_required" | "contributor_name_invalid" } {
+  if (typeof name !== "string" || !name.trim()) {
+    return { ok: false, code: "contributor_name_required" };
+  }
+
+  const result = validateContributorName(name);
+  if (!result.ok) {
+    return { ok: false, code: "contributor_name_invalid" };
+  }
+
+  return { ok: true, name: result.name };
 }
 
 function parseSelectedElement(value: unknown): {
@@ -565,10 +577,11 @@ app.post("/api/design/run", async (c) => {
     contributorName?: string;
   };
 
-  const contributorName = requireContributorName(body.contributorName);
-  if (!contributorName) {
-    return jsonError("contributor_name_required");
+  const parsedContributorName = parseContributorName(body.contributorName);
+  if (!parsedContributorName.ok) {
+    return jsonError(parsedContributorName.code);
   }
+  const contributorName = parsedContributorName.name;
 
   const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
   if (!prompt) {
@@ -590,10 +603,12 @@ app.post("/api/design/run", async (c) => {
     return mergeCooldownResponse(cooldown.retryAfterSeconds);
   }
 
-  const rate = await checkRateLimit(c.env.SESSIONS, `${clientIp(c.req.raw)}:${sessionId}`);
+  const rate = await checkDesignRateLimit(c.env.SESSIONS, `${clientIp(c.req.raw)}:${sessionId}`);
   if (!rate.allowed) {
     return jsonError("rate_limit_exceeded", 429, {
+      code: "rate_limit_exceeded",
       retryAfterSeconds: rate.retryAfterSeconds,
+      message: `Design prompt limit reached — try again in ~${Math.ceil(rate.retryAfterSeconds / 60)} min.`,
     });
   }
 
@@ -654,10 +669,11 @@ app.post("/api/design/publish", async (c) => {
     contributorName?: string;
   };
 
-  const contributorName = requireContributorName(body.contributorName);
-  if (!contributorName) {
-    return jsonError("contributor_name_required");
+  const parsedContributorName = parseContributorName(body.contributorName);
+  if (!parsedContributorName.ok) {
+    return jsonError(parsedContributorName.code);
   }
+  const contributorName = parsedContributorName.name;
 
   const baseSha = typeof body.baseSha === "string" ? body.baseSha.trim() : "";
   if (!baseSha) {
@@ -680,7 +696,7 @@ app.post("/api/design/publish", async (c) => {
   }
 
   try {
-    const { commitUrl } = await publishWithAttribution(c.env, {
+    const { commitUrl, sha: commitSha } = await publishWithAttribution(c.env, {
       acceptedPatches,
       contributorName,
       baseSha,
@@ -696,6 +712,7 @@ app.post("/api/design/publish", async (c) => {
     return c.json({
       ok: true,
       commitUrl,
+      commitSha,
       patchCount: acceptedPatches.length,
       cooldownSeconds: Math.ceil(mergeCooldownMs(c.env) / 1000),
     });
@@ -719,16 +736,32 @@ app.get("/api/design/status", async (c) => {
   }
 });
 
+app.get("/api/design/deploy-status", async (c) => {
+  const sha = c.req.query("sha")?.trim();
+  if (!sha) {
+    return jsonError("sha_required");
+  }
+
+  try {
+    const status = await checkProductionDeploy(c.env, sha);
+    return c.json({ ok: true, sha, ...status });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "deploy_status_failed";
+    return jsonError(message, 502);
+  }
+});
+
 app.post("/api/agent/session", async (c) => {
   if (!c.env.CURSOR_API_KEY) {
     return jsonError("server_misconfigured", 503);
   }
 
   const body = (await c.req.json()) as { sessionId?: string; contributorName?: string };
-  const contributorName = requireContributorName(body.contributorName);
-  if (!contributorName) {
-    return jsonError("contributor_name_required");
+  const parsedContributorName = parseContributorName(body.contributorName);
+  if (!parsedContributorName.ok) {
+    return jsonError(parsedContributorName.code);
   }
+  const contributorName = parsedContributorName.name;
 
   const sessionId =
     typeof body.sessionId === "string" && body.sessionId.length > 0
@@ -797,10 +830,11 @@ app.post("/api/agent/message", async (c) => {
     contributorName?: string;
   };
 
-  const contributorName = requireContributorName(body.contributorName);
-  if (!contributorName) {
-    return jsonError("contributor_name_required");
+  const parsedContributorName = parseContributorName(body.contributorName);
+  if (!parsedContributorName.ok) {
+    return jsonError(parsedContributorName.code);
   }
+  const contributorName = parsedContributorName.name;
 
   const message = typeof body.message === "string" ? body.message.trim() : "";
   if (!message) {
@@ -1259,8 +1293,15 @@ app.post("/api/agent/runs/:runId/submit", async (c) => {
     contributorName?: string;
   };
 
-  const contributorName =
-    requireContributorName(body.contributorName) ?? session.contributorName;
+  const parsedContributorName = parseContributorName(body.contributorName);
+  const contributorName = parsedContributorName.ok
+    ? parsedContributorName.name
+    : session.contributorName;
+  if (!contributorName) {
+    return jsonError(
+      parsedContributorName.ok ? "contributor_name_required" : parsedContributorName.code,
+    );
+  }
   const baseRef = c.env.GITHUB_DEFAULT_BRANCH ?? "main";
   const branch = session.branch;
   const mergeMessage = buildMergeCommitMessage(contributorName, branch);

@@ -12,7 +12,7 @@ import {
   useSetAgentBusy,
 } from "@/components/design/DesignChangesProvider";
 import { streamDesignRun, type DesignStreamEvent } from "@/lib/agent-client";
-import { readContributorName, subscribeContributorName } from "@/lib/contributor-name";
+import { readContributorName, subscribeContributorName, validateContributorName } from "@/lib/contributor-name";
 import type { ElementContext } from "@/lib/element-context";
 import { validatePatch } from "@/lib/design-patch";
 
@@ -191,7 +191,7 @@ export function ElementChatPopup({
     (phase === "complete" && (messages.length > 0 || activitySteps.length > 0));
   const assistantSummary = messages.findLast((message) => message.role === "assistant")?.content;
   const activityMessages = messages.filter((message) => message.role === "status");
-  const needsName = contributorName.trim().length < 2;
+  const needsName = !validateContributorName(contributorName).ok;
   const isLocked = phase === "running" || (phase === "complete" && showConfirm);
 
   useEffect(() => subscribeContributorName(setContributorName), []);

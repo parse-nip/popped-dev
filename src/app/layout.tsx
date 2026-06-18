@@ -14,13 +14,15 @@ export const metadata: Metadata = {
   },
 };
 
+const deploySha = process.env.NEXT_PUBLIC_DEPLOY_SHA ?? "dev";
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-deploy-sha={deploySha}>
       <body className="min-h-screen antialiased">{children}</body>
     </html>
   );

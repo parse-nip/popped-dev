@@ -6,10 +6,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
-import { getSessionId } from "@/lib/agent-client";
+import { fetchDesignDeployStatus, getSessionId } from "@/lib/agent-client";
 import {
   clearDesignState,
   readDesignState,
@@ -41,15 +42,18 @@ type DesignChangesContextValue = {
     publishUrl?: string | null,
     publishError?: string | null,
   ) => void;
-  finishPublish: (commitUrl: string) => void;
+  finishPublish: (commitUrl: string, commitSha: string, patches: DesignPatch[]) => void;
   clearSession: () => void;
 };
 
 const DesignChangesContext = createContext<DesignChangesContextValue | null>(null);
 
+const DEPLOY_POLL_MS = 4000;
+
 export function DesignChangesProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DesignState>(() => readDesignState(getSessionId()));
   const [isAgentBusy, setIsAgentBusy] = useState(false);
+  const deployPollRef = useRef<number | null>(null);
 
   const syncFromStore = useCallback(() => {
     setState(readDesignState(getSessionId()));
@@ -63,15 +67,58 @@ export function DesignChangesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     reapplyDraftPatches([
       ...state.acceptedPatches,
+      ...state.deployHoldPatches,
       ...(state.pendingPatch ? [state.pendingPatch] : []),
     ]);
-  }, [state.acceptedPatches, state.pendingPatch]);
+  }, [state.acceptedPatches, state.deployHoldPatches, state.pendingPatch]);
 
   const persist = useCallback((patch: Partial<DesignState>) => {
     const next = writeDesignState(patch, getSessionId());
     setState(next);
     return next;
   }, []);
+
+  const releaseDeployHold = useCallback(() => {
+    clearAllDraftPatches();
+    persist({
+      deployHoldPatches: [],
+      publishedSha: null,
+      publishStatus: "deployed",
+    });
+  }, [persist]);
+
+  useEffect(() => {
+    if (deployPollRef.current) {
+      window.clearInterval(deployPollRef.current);
+      deployPollRef.current = null;
+    }
+
+    if (state.publishStatus !== "deploying" || !state.publishedSha) {
+      return;
+    }
+
+    const poll = () => {
+      void fetchDesignDeployStatus(state.publishedSha!)
+        .then((status) => {
+          if (status.ready) {
+            releaseDeployHold();
+          }
+        })
+        .catch(() => {
+          // keep polling — deploy may still be building
+        });
+    };
+
+    poll();
+    deployPollRef.current = window.setInterval(poll, DEPLOY_POLL_MS);
+
+    return () => {
+      if (deployPollRef.current) {
+        window.clearInterval(deployPollRef.current);
+        deployPollRef.current = null;
+      }
+    };
+  }, [state.publishStatus, state.publishedSha, releaseDeployHold]);
 
   const setSelectedDesignId = useCallback(
     (designId: string | null) => {
@@ -130,18 +177,18 @@ export function DesignChangesProvider({ children }: { children: ReactNode }) {
   );
 
   const finishPublish = useCallback(
-    (commitUrl: string) => {
-      clearAllDraftPatches();
+    (commitUrl: string, commitSha: string, patches: DesignPatch[]) => {
       persist({
         acceptedPatches: [],
         pendingPatch: null,
-        rejectedPatches: state.rejectedPatches,
-        publishStatus: "published",
+        deployHoldPatches: patches,
+        publishedSha: commitSha,
+        publishStatus: "deploying",
         publishUrl: commitUrl,
         publishError: null,
       });
     },
-    [persist, state.rejectedPatches],
+    [persist],
   );
 
   const clearSession = useCallback(() => {
@@ -167,7 +214,6 @@ export function DesignChangesProvider({ children }: { children: ReactNode }) {
       setPublishStatus,
       finishPublish,
       clearSession,
-      /** Internal — set agent busy during SSE run */
       _setAgentBusy: setIsAgentBusy,
     }),
     [

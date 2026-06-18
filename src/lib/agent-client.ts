@@ -1,4 +1,5 @@
 import { readContributorName } from "@/lib/contributor-name";
+import { validateContributorName } from "@shared/contributor-name-validation";
 import { clearDesignState } from "@/lib/design-changes-store";
 import {
   MERGE_COOLDOWN_MS,
@@ -39,7 +40,8 @@ function apiUrl(path: string): string {
 
 export function getContributorName(): string {
   if (typeof window === "undefined") return "";
-  return readContributorName();
+  const name = readContributorName();
+  return validateContributorName(name).ok ? name : "";
 }
 
 export function getSessionId(): string {
@@ -76,6 +78,20 @@ function parseAgentError(
     return new Error(
       `You just merged a design — wait ~${minutes} min before starting a new cloud agent.`,
     );
+  }
+  if (response.status === 429 && payload?.code === "rate_limit_exceeded") {
+    const seconds = payload.retryAfterSeconds ?? 3600;
+    const minutes = Math.max(1, Math.ceil(seconds / 60));
+    return new Error(
+      payload.message ??
+        `Design prompt limit reached — try again in ~${minutes} min.`,
+    );
+  }
+  if (payload?.error === "contributor_name_invalid") {
+    return new Error("Please choose a respectful name for attribution.");
+  }
+  if (payload?.error === "contributor_name_required") {
+    return new Error("Add your name before using the design agent.");
   }
   return new Error(payload?.message ?? payload?.error ?? "Agent request failed.");
 }
@@ -722,10 +738,30 @@ export async function fetchDesignBaseSha(): Promise<string> {
   return data.baseSha;
 }
 
+export async function fetchDesignDeployStatus(
+  sha: string,
+): Promise<{ ready: boolean; phase: string; progress: number }> {
+  const params = new URLSearchParams({ sha });
+  const response = await fetch(apiUrl(`/api/design/deploy-status?${params.toString()}`));
+  if (!response.ok) {
+    throw new Error("Could not fetch deploy status.");
+  }
+  const data = (await response.json()) as {
+    ready?: boolean;
+    phase?: string;
+    progress?: number;
+  };
+  return {
+    ready: data.ready === true,
+    phase: data.phase ?? "building",
+    progress: data.progress ?? 0,
+  };
+}
+
 export async function publishDesignPatches(params: {
   acceptedPatches: DesignPatch[];
   baseSha: string;
-}): Promise<{ commitUrl: string; patchCount: number }> {
+}): Promise<{ commitUrl: string; commitSha: string; patchCount: number }> {
   const contributorName = getContributorName();
   if (!contributorName) {
     throw new Error("Contributor name is required.");
@@ -753,6 +789,7 @@ export async function publishDesignPatches(params: {
 
   const result = (await response.json()) as {
     commitUrl?: string;
+    commitSha?: string;
     patchCount?: number;
     cooldownSeconds?: number;
   };
@@ -762,6 +799,7 @@ export async function publishDesignPatches(params: {
 
   return {
     commitUrl: result.commitUrl ?? "",
+    commitSha: result.commitSha ?? "",
     patchCount: result.patchCount ?? params.acceptedPatches.length,
   };
 }

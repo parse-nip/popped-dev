@@ -283,6 +283,10 @@
     cursor: not-allowed;
   }
 
+  .contributor-name-header-field .contributor-name-error {
+    margin-top: 0.35rem;
+  }
+
   @media (max-width: 640px) {
     .contributor-name-header-label {
       position: absolute;
@@ -1211,6 +1215,14 @@
     line-height: 1.5;
     letter-spacing: var(--welcome-letter-spacing);
     color: var(--color-text-muted);
+  }
+
+  .contributor-name-error {
+    font-family: inherit;
+    font-size: var(--welcome-text-size);
+    line-height: 1.5;
+    letter-spacing: var(--welcome-letter-spacing);
+    color: #c0392b;
   }
 
   .locked-intro-input {

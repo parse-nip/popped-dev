@@ -146,6 +146,6 @@ export async function publishWithAttribution(
     baseSha: string;
     sessionId: string;
   },
-): Promise<{ commitUrl: string }> {
+): Promise<{ commitUrl: string; sha: string }> {
   return publishDesignPatches(env, params);
 }

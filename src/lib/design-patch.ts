@@ -9,7 +9,13 @@ export type DesignPatch = {
   summary: string;
 };
 
-export type DesignPublishStatus = "idle" | "publishing" | "published" | "failed";
+export type DesignPublishStatus =
+  | "idle"
+  | "publishing"
+  | "published"
+  | "deploying"
+  | "deployed"
+  | "failed";
 
 export type SelectedElementPayload = {
   designId: string;

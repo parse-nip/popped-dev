@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
+import {
+  contributorNameErrorMessage,
+  writeContributorName,
+} from "@/lib/contributor-name";
 
 const ATTRIBUTION_KEY = "popped.dev:contributor-name";
 
@@ -12,6 +16,18 @@ function readStoredName(): string {
 
 export function LockedIntro() {
   const [name, setName] = useState(readStoredName);
+  const [error, setError] = useState<string | null>(null);
+
+  function persistName(value: string) {
+    const result = writeContributorName(value);
+    if (!result.ok) {
+      setError(contributorNameErrorMessage(result.error));
+      return;
+    }
+
+    setError(null);
+    setName(result.name);
+  }
 
   return (
     <section id="locked-intro" data-locked="true" aria-label="How this site works">
@@ -54,11 +70,20 @@ export function LockedIntro() {
             value={name}
             onChange={(e) => {
               setName(e.target.value);
-              localStorage.setItem(ATTRIBUTION_KEY, e.target.value);
+              setError(null);
             }}
+            onBlur={() => persistName(name)}
             className="locked-intro-input"
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? "contributor-name-error" : undefined}
           />
-          <p className="locked-intro-helper">This will be shown with your contributions.</p>
+          {error ? (
+            <p id="contributor-name-error" className="contributor-name-error" role="alert">
+              {error}
+            </p>
+          ) : (
+            <p className="locked-intro-helper">This will be shown with your contributions.</p>
+          )}
         </div>
       </div>
     </section>

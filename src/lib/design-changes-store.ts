@@ -1,11 +1,16 @@
 import type { DesignPatch, DesignPublishStatus } from "@/lib/design-patch";
 
+export type { DesignPublishStatus };
+
 export type DesignState = {
   sessionId: string;
   selectedDesignId: string | null;
   pendingPatch: DesignPatch | null;
   acceptedPatches: DesignPatch[];
   rejectedPatches: DesignPatch[];
+  /** Keeps draft CSS visible after publish until Cloudflare deploys. */
+  deployHoldPatches: DesignPatch[];
+  publishedSha: string | null;
   publishStatus: DesignPublishStatus;
   publishUrl: string | null;
   publishError: string | null;
@@ -22,6 +27,8 @@ const EMPTY_STATE = (): Omit<DesignState, "sessionId"> => ({
   pendingPatch: null,
   acceptedPatches: [],
   rejectedPatches: [],
+  deployHoldPatches: [],
+  publishedSha: null,
   publishStatus: "idle",
   publishUrl: null,
   publishError: null,

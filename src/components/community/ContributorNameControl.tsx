@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import {
+  contributorNameErrorMessage,
   readContributorName,
   subscribeContributorName,
+  validateContributorName,
   writeContributorName,
 } from "@/lib/contributor-name";
 
@@ -18,17 +20,27 @@ export function ContributorNameControl({
   id = "contributor-name",
 }: ContributorNameControlProps) {
   const [name, setName] = useState(readContributorName);
+  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(() => !readContributorName());
 
   useEffect(() => subscribeContributorName(setName), []);
 
   function commit(value: string) {
-    writeContributorName(value);
-    setName(value.trim());
-    if (value.trim()) {
+    const result = writeContributorName(value);
+    if (!result.ok) {
+      setError(contributorNameErrorMessage(result.error));
+      return;
+    }
+
+    setError(null);
+    setName(result.name);
+    if (result.name) {
       setEditing(false);
     }
   }
+
+  const validation = validateContributorName(name);
+  const canSave = validation.ok;
 
   if (variant === "prompt") {
     return (
@@ -44,7 +56,10 @@ export function ContributorNameControl({
           id={id}
           placeholder="How should we credit you?"
           value={name}
-          onChange={(event) => setName(event.target.value)}
+          onChange={(event) => {
+            setName(event.target.value);
+            setError(null);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -53,11 +68,18 @@ export function ContributorNameControl({
           }}
           className="locked-intro-input contributor-name-prompt-input"
           autoFocus
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-error` : undefined}
         />
+        {error ? (
+          <p id={`${id}-error`} className="contributor-name-error" role="alert">
+            {error}
+          </p>
+        ) : null}
         <button
           type="button"
           className="contributor-name-prompt-save"
-          disabled={!name.trim()}
+          disabled={!canSave}
           onClick={() => commit(name)}
         >
           Save and continue
@@ -90,20 +112,36 @@ export function ContributorNameControl({
         id={id}
         placeholder="Credit name"
         value={name}
-        onChange={(event) => setName(event.target.value)}
+        onChange={(event) => {
+          setName(event.target.value);
+          setError(null);
+        }}
         onBlur={() => {
-          commit(name);
-          if (name.trim()) setEditing(false);
+          if (canSave) {
+            commit(name);
+            if (name.trim()) setEditing(false);
+          } else if (name.trim()) {
+            setError(
+              validation.ok ? null : contributorNameErrorMessage(validation.error),
+            );
+          }
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
             event.preventDefault();
             commit(name);
-            if (name.trim()) setEditing(false);
+            if (canSave) setEditing(false);
           }
         }}
         className="contributor-name-header-input"
+        aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
       />
+      {error ? (
+        <p id={`${id}-error`} className="contributor-name-error" role="alert">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }
