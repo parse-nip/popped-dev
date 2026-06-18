@@ -49,19 +49,3 @@ export type PublishResponse = {
   prUrl?: string;
   changedPaths: string[];
 };
-
-export const STATUS_LABELS: Record<DesignWorkspaceStatus, string> = {
-  idle: "Idle",
-  booting: "Booting WebContainer…",
-  loading_files: "Loading project files…",
-  installing: "Installing dependencies…",
-  starting_dev: "Starting dev server…",
-  ready: "Ready",
-  agent_editing: "Agent editing…",
-  applying_changes: "Applying file changes…",
-  installing_packages: "Installing new packages…",
-  build_error: "Build / dev error",
-  ready_to_publish: "Ready to publish",
-  publishing: "Publishing…",
-  published: "Published",
-};

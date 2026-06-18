@@ -1,6 +1,7 @@
 "use client";
 
-import { STATUS_LABELS, type DesignWorkspaceStatus, type EditEvent, type FileChange } from "./types";
+import { STATUS_LABELS } from "./status-message";
+import type { DesignWorkspaceStatus, EditEvent, FileChange } from "./types";
 import { summarizeDiff } from "./diff";
 
 type DesignStatusPanelProps = {
