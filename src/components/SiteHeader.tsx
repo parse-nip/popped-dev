@@ -27,7 +27,7 @@ function DesignCursorIcon() {
 }
 
 export function SiteHeader() {
-  const { isDesignMode, toggleDesignMode } = useDesignMode();
+  const { isDesignMode } = useDesignMode();
   const { isAgentBusy } = useDesignChanges();
   const { active: mergeCooldownActive, remainingMs } = useMergeCooldown();
   const designDisabled = isDraftPreviewEmbed() || mergeCooldownActive;
@@ -67,26 +67,20 @@ export function SiteHeader() {
             Agent working…
           </span>
         ) : (
-        <button
-        type="button"
-        role="switch"
-        aria-checked={isDesignMode}
-        aria-label="Design mode"
-        className={
-          isDesignMode
-            ? "site-header-design-switch site-header-design-switch--on"
-            : "site-header-design-switch"
-        }
-        onClick={toggleDesignMode}
-      >
-        <span className="site-header-design-switch-icon">
-          <DesignCursorIcon />
-        </span>
-        <span className="site-header-design-switch-label">Design</span>
-        <span className="site-header-design-switch-track" aria-hidden="true">
-          <span className="site-header-design-switch-thumb" />
-        </span>
-      </button>
+        <Link
+          href="/design"
+          className={
+            isDesignMode
+              ? "site-header-design-switch site-header-design-switch--on"
+              : "site-header-design-switch"
+          }
+          aria-label="Open design workspace"
+        >
+          <span className="site-header-design-switch-icon">
+            <DesignCursorIcon />
+          </span>
+          <span className="site-header-design-switch-label">Design</span>
+        </Link>
         )}
       </div>
     </header>

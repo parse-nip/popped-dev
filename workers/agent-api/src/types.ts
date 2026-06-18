@@ -57,6 +57,10 @@ export type Env = {
   CLEANUP_TTL_MS?: string;
   /** Cooldown after merge before a new cloud agent can start. Default: 1800000 (30 minutes). */
   MERGE_COOLDOWN_MS?: string;
+  /** Branch for project file fetch / publish. Falls back to GITHUB_DEFAULT_BRANCH. */
+  GITHUB_BRANCH?: string;
+  /** commit = direct to branch; pr = feature branch + pull request */
+  PUBLISH_MODE?: "commit" | "pr";
 };
 
 export type GitBranchInfo = {

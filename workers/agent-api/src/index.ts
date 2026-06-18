@@ -59,6 +59,9 @@ import {
 } from "./stream-transform";
 import type { ElementContextPayload, Env, RunRecord, SessionRecord } from "./types";
 import { validateContributorName } from "../../../shared/contributor-name-validation";
+import { runAgentEdit, type AgentEditInput } from "./agent-edit";
+import { fetchProjectFiles } from "./project-files";
+import { publishWorkspaceChanges } from "./workspace-publish";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -1377,6 +1380,127 @@ app.post("/api/agent/runs/:runId/submit", async (c) => {
   } catch (error) {
     const msg = error instanceof Error ? error.message : "submit_failed";
     return jsonError(msg, 502);
+  }
+});
+
+app.get("/api/project-files", async (c) => {
+  if (!c.env.GITHUB_TOKEN) {
+    return jsonError("github_token_required", 503);
+  }
+
+  try {
+    const result = await fetchProjectFiles(c.env);
+    return c.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "project_files_failed";
+    return jsonError(message, 502);
+  }
+});
+
+app.post("/api/agent/edit", async (c) => {
+  const body = (await c.req.json()) as {
+    prompt?: string;
+    selectedElement?: unknown;
+    files?: Record<string, string>;
+  };
+
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) {
+    return jsonError("invalid_prompt");
+  }
+
+  const files = body.files && typeof body.files === "object" ? body.files : null;
+  if (!files || Object.keys(files).length === 0) {
+    return jsonError("files_required");
+  }
+
+  const selectedElement =
+    body.selectedElement && typeof body.selectedElement === "object"
+      ? (body.selectedElement as AgentEditInput["selectedElement"])
+      : null;
+
+  try {
+    const result = await runAgentEdit(c.env, {
+      prompt,
+      selectedElement,
+      files,
+    });
+    return c.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "agent_edit_failed";
+    return jsonError(message, 502);
+  }
+});
+
+app.post("/api/publish", async (c) => {
+  if (!c.env.GITHUB_TOKEN) {
+    return jsonError("github_token_required", 503);
+  }
+
+  const body = (await c.req.json()) as {
+    baseSha?: string;
+    contributorName?: string;
+    changes?: Array<{ path: string; content: string; action?: string }>;
+    allowContentFactChanges?: boolean;
+    summary?: string;
+  };
+
+  const parsedContributorName = parseContributorName(body.contributorName);
+  if (!parsedContributorName.ok) {
+    return jsonError(parsedContributorName.code);
+  }
+
+  const baseSha = typeof body.baseSha === "string" ? body.baseSha.trim() : "";
+  if (!baseSha) {
+    return jsonError("base_sha_required");
+  }
+
+  const changes = Array.isArray(body.changes)
+    ? body.changes
+        .filter(
+          (item) =>
+            item &&
+            typeof item.path === "string" &&
+            typeof item.content === "string",
+        )
+        .map((item) => ({
+          path: item.path,
+          content: item.content,
+          action: (item.action === "delete" ? "delete" : "modify") as
+            | "create"
+            | "modify"
+            | "delete",
+        }))
+    : [];
+
+  if (changes.length === 0) {
+    return jsonError("no_changes");
+  }
+
+  const cooldown = await checkMergeCooldown(c.env.SESSIONS, clientIp(c.req.raw));
+  if (!cooldown.allowed) {
+    return mergeCooldownResponse(cooldown.retryAfterSeconds);
+  }
+
+  try {
+    const result = await publishWorkspaceChanges(c.env, {
+      baseSha,
+      contributorName: parsedContributorName.name,
+      changes,
+      allowContentFactChanges: body.allowContentFactChanges === true,
+      summary: typeof body.summary === "string" ? body.summary : undefined,
+    });
+
+    await setMergeCooldown(
+      c.env.SESSIONS,
+      clientIp(c.req.raw),
+      mergeCooldownMs(c.env),
+    );
+
+    return c.json({ ok: true, ...result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "publish_failed";
+    return jsonError(message, 502);
   }
 });
 
