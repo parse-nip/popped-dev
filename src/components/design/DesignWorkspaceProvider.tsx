@@ -79,16 +79,18 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 }
 
+type FileSnapshot = Record<string, string | null>;
+
 async function snapshotFilePaths(
   container: WebContainer,
   paths: string[],
-): Promise<Record<string, string>> {
-  const snapshot: Record<string, string> = {};
-  for (const path of paths) {
+): Promise<FileSnapshot> {
+  const snapshot: FileSnapshot = {};
+  for (const path of new Set(paths)) {
     try {
       snapshot[path] = await readFile(container, path);
     } catch {
-      // File did not exist before this edit batch.
+      snapshot[path] = null;
     }
   }
   return snapshot;
@@ -96,11 +98,29 @@ async function snapshotFilePaths(
 
 async function restoreFileSnapshot(
   container: WebContainer,
-  snapshot: Record<string, string>,
+  snapshot: FileSnapshot,
 ): Promise<void> {
   for (const [path, content] of Object.entries(snapshot)) {
+    if (content === null) {
+      try {
+        await container.fs.rm(path);
+      } catch {
+        // Missing files are already restored to their pre-edit state.
+      }
+      continue;
+    }
     await writeFile(container, path, content);
   }
+}
+
+async function addMissingPathsToSnapshot(
+  container: WebContainer,
+  snapshot: FileSnapshot,
+  paths: string[],
+): Promise<void> {
+  const missing = paths.filter((path) => !(path in snapshot));
+  if (missing.length === 0) return;
+  Object.assign(snapshot, await snapshotFilePaths(container, missing));
 }
 
 export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
@@ -394,6 +414,12 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
               : `Applying fix (${fixAttempt}/${DESIGN_FIX_MAX_ATTEMPTS})…`,
           );
 
+          await addMissingPathsToSnapshot(
+            container,
+            preEditSnapshot,
+            result.writes.map((write) => write.path),
+          );
+
           for (const write of result.writes) {
             await writeFile(container, write.path, write.content);
           }
@@ -515,6 +541,11 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
 
           if (wireResult.writes?.length) {
             setStatus("applying_changes");
+            await addMissingPathsToSnapshot(
+              container,
+              preEditSnapshot,
+              wireResult.writes.map((write) => write.path),
+            );
             for (const write of wireResult.writes) {
               await writeFile(container, write.path, write.content);
             }

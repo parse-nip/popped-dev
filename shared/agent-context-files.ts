@@ -10,11 +10,16 @@ const BOOTSTRAP_PATHS = [
   "src/components/community/CommunityChrome.tsx",
   "src/components/locked/LockedResume.tsx",
   "src/locked/experience.json",
+  "shared/editable-workspace-paths.ts",
+  "workers/agent-api/src/index.ts",
+  "workers/agent-api/src/agent-edit.ts",
+  "workers/agent-api/src/project-files.ts",
+  "workers/agent-api/package.json",
 ];
 
 const PRIORITY_MAX_CHARS = 16_000;
-const DEFAULT_MAX_CHARS = 6_000;
-const TOTAL_CHAR_BUDGET = 200_000;
+const DEFAULT_MAX_CHARS = 10_000;
+const TOTAL_CHAR_BUDGET = 400_000;
 
 function truncateContent(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content;

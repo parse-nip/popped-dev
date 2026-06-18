@@ -9,22 +9,13 @@ import {
 } from "./design-support";
 import { patchPackageJsonForWebContainer } from "./patch-project-for-webcontainer";
 import { pickAgentContextFiles } from "@shared/agent-context-files";
+import { isEditableWorkspacePath } from "@shared/editable-workspace-paths";
 import { createInstallProgressReporter } from "./install-progress";
 
 export { startDevServer } from "./dev-server";
 
 let webcontainerPromise: Promise<WebContainer> | null = null;
 let webcontainerInstance: WebContainer | null = null;
-
-const TRACKED_PREFIXES = ["src/", "public/", "shared/", "scripts/"];
-const TRACKED_ROOT_FILES = new Set([
-  "package.json",
-  "next.config.ts",
-  "postcss.config.mjs",
-  "components.json",
-  "tsconfig.json",
-  "eslint.config.mjs",
-]);
 
 export type WorkspaceSession = {
   container: WebContainer;
@@ -34,9 +25,7 @@ export type WorkspaceSession = {
 };
 
 function shouldTrackPath(path: string): boolean {
-  if (!path || path.endsWith("/")) return false;
-  if (TRACKED_ROOT_FILES.has(path)) return true;
-  return TRACKED_PREFIXES.some((prefix) => path.startsWith(prefix));
+  return isEditableWorkspacePath(path);
 }
 
 export function flatFilesToTree(files: Record<string, string>): FileSystemTree {
@@ -210,14 +199,6 @@ async function walkDirectory(
 export async function listTrackedFiles(container: WebContainer): Promise<Record<string, string>> {
   const files: Record<string, string> = {};
   await walkDirectory(container, ".", files);
-
-  for (const rootFile of TRACKED_ROOT_FILES) {
-    try {
-      files[rootFile] = await readFile(container, rootFile);
-    } catch {
-      // optional root file
-    }
-  }
 
   return files;
 }

@@ -55,11 +55,14 @@ The JSON must match this shape:
 }
 
 Rules:
-- You may edit ANY file in the project except locked fact files (see below). Create new files freely under src/, public/, shared/, scripts/.
+- You may edit almost ANY file in the project except locked fact files, secret env files, and generated/vendor folders. App code, worker code, shared libraries, docs, scripts, configs, and public assets are all fair game.
+- Create new files freely anywhere editable when the request needs them.
 - Multi-file changes are normal — add a component AND wire it in layout/page, update CSS AND TSX, refactor imports across files, etc.
 - **CRITICAL wiring:** New UI must render on the site. Always import and render new components from src/components/community/CommunityChrome.tsx and/or src/components/HomeShell.tsx. A new .tsx file alone is invisible.
 - Prefer CommunityChrome.tsx for sidebars, overlays, and extra chrome.
 - Return FULL file contents for every file in writes[] (not diffs). Include every file you create or modify.
+- If a request needs a broad app change, edit every affected file in the same response. Do not collapse broad requests into a tiny CSS fallback.
+- Preserve existing imports/exports and locked-fact rendering. When changing a file, return the complete final file exactly as it should exist.
 - NEVER modify locked fact files: src/locked/experience.json, src/locked/manifest.json, src/components/locked/LockedIntro.tsx, or any path under src/locked/.
 - You MAY edit src/components/locked/LockedResume.tsx for layout/styling (never reword fact text).
 - You MAY read src/locked/experience.json for facts and surface them in new components — but never change the JSON.
@@ -247,7 +250,7 @@ function openRouterErrorMessage(result: OpenRouterChatResult): string {
 async function callDesignLlm(
   env: Env,
   messages: ChatMessage[],
-  maxTokens = 16_384,
+  maxTokens = 32_768,
 ): Promise<OpenRouterChatResult> {
   return openRouterChat(env, messages, {
     maxTokens,
@@ -279,7 +282,7 @@ async function runLlmEditPass(
     const aiResult = await callDesignLlm(
       env,
       messages,
-      options.strict ? 8_192 : 16_384,
+      options.strict ? 32_768 : 24_576,
     );
 
     if (hasOpenRouter && !aiResult.text) {

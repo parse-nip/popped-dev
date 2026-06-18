@@ -1,13 +1,17 @@
 import { unzipSync } from "fflate";
 import type { Env } from "./types";
+import { isEditableWorkspacePath } from "../../../shared/editable-workspace-paths";
+import { isLockedFactPath } from "../../../shared/locked-fact-files";
 
 const EXCLUDED_PREFIXES = [
   "node_modules/",
   ".git/",
   ".next/",
   "out/",
-  "workers/",
-  ".cursor/",
+  "dist/",
+  "coverage/",
+  ".vercel/",
+  ".wrangler/",
 ];
 
 const TEXT_FILE =
@@ -25,6 +29,8 @@ function shouldIncludePath(path: string): boolean {
     return false;
   }
   if (path.includes("node_modules")) return false;
+  if (isLockedFactPath(path)) return path === "src/locked/experience.json";
+  if (isEditableWorkspacePath(path)) return true;
 
   if (!path.includes("/")) {
     return TEXT_FILE.test(path) || /^(package\.json|package-lock\.json)$/.test(path);

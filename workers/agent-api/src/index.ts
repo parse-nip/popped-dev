@@ -1502,7 +1502,13 @@ app.post("/api/publish", async (c) => {
         .map((item) => ({
           path: item.path,
           content: item.content,
-          action: (item.action === "delete" ? "delete" : "modify") as
+          action: (
+            item.action === "delete"
+              ? "delete"
+              : item.action === "create"
+                ? "create"
+                : "modify"
+          ) as
             | "create"
             | "modify"
             | "delete",
