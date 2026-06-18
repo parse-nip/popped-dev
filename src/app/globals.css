@@ -507,6 +507,33 @@
     color: rgba(17, 17, 17, 0.45);
   }
 
+  .your-changes-publish-guide {
+    margin: 0 16px 12px;
+    padding: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.02);
+  }
+
+  .your-changes-publish-guide-title {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(17, 17, 17, 0.72);
+  }
+
+  .your-changes-publish-guide-list {
+    margin: 0;
+    padding-left: 1.1rem;
+    font-size: 12px;
+    line-height: 1.5;
+    color: rgba(17, 17, 17, 0.55);
+  }
+
+  .your-changes-publish-guide-list li + li {
+    margin-top: 0.35rem;
+  }
+
   .your-changes-list {
     list-style: none;
     margin: 0;
@@ -853,6 +880,88 @@
     letter-spacing: var(--welcome-letter-spacing);
     color: var(--color-text-secondary);
     text-wrap: pretty;
+  }
+
+  .welcome-info-cards {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+  }
+
+  .welcome-info-cards--two {
+    grid-template-columns: 1fr;
+  }
+
+  @media (min-width: 520px) {
+    .welcome-info-cards--two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .welcome-info-card {
+    padding: 1rem 1.125rem;
+    border: 1px solid var(--color-border);
+    border-radius: 14px;
+    background: var(--color-surface);
+  }
+
+  .welcome-info-card--wait {
+    border-style: dashed;
+    background: var(--color-surface-soft);
+  }
+
+  .welcome-info-card--editable {
+    background: var(--color-accent-blue);
+    border-color: rgba(49, 95, 220, 0.12);
+  }
+
+  .welcome-info-card--locked {
+    background: var(--color-accent-amber);
+    border-color: rgba(164, 95, 18, 0.12);
+  }
+
+  .welcome-info-card-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 1.5rem;
+    padding: 0 0.5rem;
+    border-radius: 999px;
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    background: rgba(255, 255, 255, 0.72);
+    color: var(--color-text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .welcome-info-card--editable .welcome-info-card-badge {
+    color: var(--color-accent-blue-text);
+    background: rgba(255, 255, 255, 0.82);
+  }
+
+  .welcome-info-card--locked .welcome-info-card-badge {
+    color: var(--color-accent-amber-text);
+    background: rgba(255, 255, 255, 0.82);
+  }
+
+  .welcome-info-card-title {
+    margin: 0.5rem 0 0.25rem;
+    font-size: 0.9375rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--color-text-primary);
+  }
+
+  .welcome-info-card-body {
+    margin: 0;
+    font-size: var(--welcome-text-size);
+    line-height: 1.55;
+    letter-spacing: var(--welcome-letter-spacing);
+    color: var(--color-text-secondary);
+  }
+
+  .welcome-info-cards .welcome-step-design-bar {
+    margin-bottom: 0.25rem;
   }
 
   .welcome-step-visual {

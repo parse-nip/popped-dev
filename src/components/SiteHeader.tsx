@@ -53,6 +53,8 @@ export function SiteHeader() {
       publishStatus === "deploying" ||
       publishStatus === "published");
 
+  const publishWaitingForPreview = showHeaderPublish && !showLivePreview && publishStatus !== "published";
+
   const publishLabel =
     publishStatus === "publishing"
       ? "Publishing…"
@@ -60,7 +62,20 @@ export function SiteHeader() {
         ? "Deploying…"
         : publishStatus === "published" && commitUrl
           ? "View on GitHub"
-          : "Publish to GitHub";
+          : publishWaitingForPreview
+            ? "Waiting for preview…"
+            : "Publish to GitHub";
+
+  const publishTitle =
+    publishWaitingForPreview
+      ? "Wait for the live preview to finish loading before publishing"
+      : publishStatus === "publishing"
+        ? "Committing your styling changes to GitHub"
+        : publishStatus === "deploying"
+          ? "Cloudflare is deploying your commit to popped.dev"
+          : publishStatus === "published" && commitUrl
+            ? "Open your commit on GitHub"
+            : "Commit your styling changes to GitHub and deploy to popped.dev";
 
   async function handleHeaderPublish() {
     if (publishStatus === "published" && commitUrl) {
@@ -93,10 +108,11 @@ export function SiteHeader() {
             size="sm"
             className="site-header-publish-btn"
             data-design-select-ui
+            title={publishTitle}
             disabled={
               publishStatus === "publishing" ||
               publishStatus === "deploying" ||
-              (!showLivePreview && publishStatus !== "published")
+              publishWaitingForPreview
             }
             onClick={() => void handleHeaderPublish()}
           >

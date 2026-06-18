@@ -71,8 +71,17 @@ export function YourChangesTab() {
         <div className="your-changes-panel-header">
           <p className="your-changes-panel-title">Your changes</p>
           <p className="your-changes-panel-subtitle">
-            Edits apply live in WebContainer. Publish commits once to GitHub.
+            Preview updates instantly in your browser. Publish sends styling files to GitHub, then deploys to popped.dev.
           </p>
+        </div>
+
+        <div className="your-changes-publish-guide">
+          <p className="your-changes-publish-guide-title">What Publish to GitHub does</p>
+          <ol className="your-changes-publish-guide-list">
+            <li>Commits your styling changes to the repo (not locked resume facts).</li>
+            <li>Cloudflare rebuilds popped.dev — the button shows Deploying… for a minute or two.</li>
+            <li>When done, it becomes View on GitHub so you can open the commit.</li>
+          </ol>
         </div>
 
         {changes.length > 0 ? (
@@ -83,7 +92,15 @@ export function YourChangesTab() {
           <p className="your-changes-latest">{editEvents[0].summary}</p>
         ) : null}
 
-        {publishError ? <p className="your-changes-error">{publishError}</p> : null}
+        {publishError ? (
+          <p className="your-changes-error" role="alert">
+            {publishError}
+            {publishError.includes("changed since you started") ||
+            publishError.includes("Turn Design mode off") ? (
+              <span> Turn Design mode off and on, then try Publish again.</span>
+            ) : null}
+          </p>
+        ) : null}
 
         {commitUrl ? (
           <p className="your-changes-success">

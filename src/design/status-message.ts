@@ -15,7 +15,7 @@ export const STATUS_LABELS: Record<DesignWorkspaceStatus, string> = {
   edit_rejected: "Request not approved",
   ready_to_publish: "Ready to publish",
   publishing: "Publishing to GitHub…",
-  published: "Published — deploying…",
+  published: "Published — waiting for popped.dev deploy…",
 };
 
 type StatusMessageInput = {

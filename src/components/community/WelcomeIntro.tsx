@@ -13,42 +13,43 @@ const STEPS = [
   {
     id: "hello",
     eyebrow: "Step 1",
-    title: "Hello — welcome to popped.dev",
-    body: "You're looking at a real developer portfolio. Visitors like you can help reshape how it looks and feels — layout, typography, motion, and style — while the career facts stay protected.",
+    title: "Welcome to popped.dev",
+    body: "This is a real developer portfolio that anyone can help restyle with AI — like Wikipedia for presentation, with protected career facts.",
+    variant: "hello" as const,
   },
   {
-    id: "how-it-works",
+    id: "layers",
     eyebrow: "Step 2",
-    title: "How it works",
-    body: "Think of it as two layers: presentation you can redesign, and facts that stay locked.",
-    variant: "boundary" as const,
+    title: "Two layers to know",
+    body: "You can redesign layout, colors, typography, and motion. Jobs, education, and project facts stay locked.",
+    variant: "layers" as const,
   },
   {
-    id: "design-mode",
+    id: "boot",
     eyebrow: "Step 3",
-    title: "Turn on Design mode",
-    body: "Flip the Design switch in the header. Your cursor becomes a selector — click any part of the page to open a chat and ask the AI agent to restyle that element.",
-    variant: "design" as const,
+    title: "Turn on Design mode — then wait a bit",
+    body: "Flip the Design switch in the header. The first boot takes 30–90 seconds while packages install and the live preview starts. Watch the status bar — don’t click anything until it says you’re ready.",
+    variant: "boot" as const,
   },
   {
-    id: "contributions",
+    id: "edit",
     eyebrow: "Step 4",
-    title: "See what others built",
-    body: "Styled elements carry attribution. Hover over a redesigned section to see who contributed — every change is credited to the person who made it.",
-    variant: "contributions" as const,
+    title: "Click, describe, wait again",
+    body: "Click any part of the page to open the agent chat. Describe your change in plain English, send it, and give the agent a little time. Your edit shows up in the live preview when it’s done.",
+    variant: "edit" as const,
   },
   {
-    id: "github",
+    id: "publish",
     eyebrow: "Step 5",
-    title: "Changes go to GitHub",
-    body: "When a design is approved, the agent opens a pull request. The site owner reviews the diff, and merged changes go live for everyone.",
-    variant: "github" as const,
+    title: "Publish to GitHub",
+    body: "Happy with the preview? Hit Publish to GitHub in the header. That commits your styling files to the repo and deploys them to popped.dev — usually another minute or two.",
+    variant: "publish" as const,
   },
   {
-    id: "your-name",
+    id: "name",
     eyebrow: "Step 6",
-    title: "One last thing",
-    body: "Add your name so we can credit you when your designs are merged.",
+    title: "Add your name",
+    body: "We credit contributors on styled sections. Add the name you want shown when people hover your work.",
     variant: "name" as const,
   },
 ] as const;
@@ -63,7 +64,27 @@ function readStoredName(): string {
   return localStorage.getItem(ATTRIBUTION_KEY) ?? "";
 }
 
-type WelcomeStepVariant = "boundary" | "design" | "contributions" | "github" | "name";
+type WelcomeStepVariant = (typeof STEPS)[number]["variant"];
+
+function InfoCard({
+  badge,
+  title,
+  body,
+  tone = "default",
+}: {
+  badge?: string;
+  title: string;
+  body: string;
+  tone?: "default" | "wait" | "locked" | "editable";
+}) {
+  return (
+    <article className={`welcome-info-card welcome-info-card--${tone}`}>
+      {badge ? <span className="welcome-info-card-badge">{badge}</span> : null}
+      <h3 className="welcome-info-card-title">{title}</h3>
+      <p className="welcome-info-card-body">{body}</p>
+    </article>
+  );
+}
 
 function StepVisual({
   variant,
@@ -71,84 +92,135 @@ function StepVisual({
   onNameChange,
   nameError,
 }: {
-  variant?: WelcomeStepVariant;
+  variant: WelcomeStepVariant;
   name: string;
   onNameChange: (value: string) => void;
   nameError?: string | null;
 }) {
-  if (variant === "boundary") {
+  if (variant === "hello") {
     return (
-      <div className="welcome-step-visual welcome-step-visual--boundary">
-        <div className="welcome-step-boundary-row">
-          <span className="editable-badge">Presentation editable</span>
-          <p>Layout, styling, motion, typography, and visual structure.</p>
-        </div>
-        <div className="welcome-step-boundary-row">
-          <span className="protected-badge">
-            <span aria-hidden="true">🔒</span>
-            <span>Facts protected</span>
-          </span>
-          <p>Experience, education, achievements, and factual content stay unchanged.</p>
-        </div>
+      <div className="welcome-info-cards">
+        <InfoCard
+          badge="Community-built"
+          title="Style the site together"
+          body="Visitors use an AI agent to reshape typography, layout, and visual design."
+        />
+        <InfoCard
+          badge="Protected facts"
+          title="Career data stays fixed"
+          body="Experience, education, and projects are locked so the portfolio stays truthful."
+          tone="locked"
+        />
       </div>
     );
   }
 
-  if (variant === "design") {
+  if (variant === "layers") {
     return (
-      <div className="welcome-step-visual welcome-step-visual--design">
+      <div className="welcome-info-cards welcome-info-cards--two">
+        <InfoCard
+          badge="You can edit"
+          title="Presentation"
+          body="CSS, layout, cards, motion, fonts, spacing — anything visual."
+          tone="editable"
+        />
+        <InfoCard
+          badge="Locked"
+          title="Facts"
+          body="Job titles, dates, schools, project descriptions, and contact details in the resume JSON."
+          tone="locked"
+        />
+      </div>
+    );
+  }
+
+  if (variant === "boot") {
+    return (
+      <div className="welcome-info-cards">
         <div className="welcome-step-design-bar">
           <span className="welcome-step-design-wordmark">popped.dev</span>
           <DesignSwitchPreview active />
         </div>
-        <p className="welcome-step-design-hint">
-          Click any element → describe your change → the agent updates the presentation.
-        </p>
+        <InfoCard
+          badge="1 · Boot"
+          title="Preparing design mode"
+          body="Loads project files and installs packages in your browser."
+          tone="wait"
+        />
+        <InfoCard
+          badge="2 · Preview"
+          title="Starting live preview"
+          body="A mini dev server spins up. The status bar shows progress — wait until the preview is ready."
+          tone="wait"
+        />
+        <InfoCard
+          badge="3 · Ready"
+          title="Start clicking"
+          body="When loading finishes, your cursor becomes a selector and you can edit elements."
+        />
       </div>
     );
   }
 
-  if (variant === "contributions") {
+  if (variant === "edit") {
     return (
-      <div className="welcome-step-visual welcome-step-visual--contributions">
-        <div className="welcome-step-contrib-card">
-          <p className="welcome-step-contrib-label">Experience</p>
-          <p className="welcome-step-contrib-title">Software Engineer</p>
-          <p className="welcome-step-contrib-body">Building products with care and clarity.</p>
-        </div>
-        <div className="welcome-step-contrib-tooltip" aria-hidden="true">
-          <span className="welcome-step-contrib-tooltip-label">Styled by</span>
-          <span className="welcome-step-contrib-tooltip-name">alex.dev</span>
-        </div>
+      <div className="welcome-info-cards welcome-info-cards--two">
+        <InfoCard
+          badge="Click"
+          title="Pick an element"
+          body="Anything on the page — a heading, section, button, or card."
+        />
+        <InfoCard
+          badge="Chat"
+          title="Describe the change"
+          body="“Make this a card grid”, “use a darker background”, “bigger headline” — plain English works."
+        />
+        <InfoCard
+          badge="Wait"
+          title="Agent applies it"
+          body="The agent writes code and updates the live preview. This usually takes 10–60 seconds."
+          tone="wait"
+        />
+        <InfoCard
+          badge="See it"
+          title="Check the preview"
+          body="Tweak again if needed. Your edits stay local until you publish."
+        />
       </div>
     );
   }
 
-  if (variant === "github") {
+  if (variant === "publish") {
     return (
-      <ol className="welcome-step-visual welcome-step-visual--github">
-        <li>
-          <span className="welcome-step-github-step">1</span>
-          <span>You describe a design change</span>
-        </li>
-        <li>
-          <span className="welcome-step-github-step">2</span>
-          <span>The agent writes the code</span>
-        </li>
-        <li>
-          <span className="welcome-step-github-step">3</span>
-          <span>A pull request opens on GitHub</span>
-        </li>
-        <li>
-          <span className="welcome-step-github-step">4</span>
-          <span>Reviewed and merged when approved</span>
-        </li>
-      </ol>
+      <div className="welcome-info-cards">
+        <InfoCard
+          badge="Publish to GitHub"
+          title="Commits your styling"
+          body="Only presentation files go to GitHub — never the locked resume facts."
+        />
+        <InfoCard
+          badge="Deploy"
+          title="Goes live on popped.dev"
+          body="Cloudflare rebuilds the site after the commit. The button says Deploying… while that runs."
+          tone="wait"
+        />
+        <InfoCard
+          badge="If it fails"
+          title="Site changed on GitHub?"
+          body="If someone else pushed meanwhile, turn Design mode off and on once, then publish again. The app will try to sync automatically."
+          tone="wait"
+        />
+      </div>
     );
   }
 
-  if (variant === "name") {
-    return (
+  return (
+    <div className="welcome-info-cards">
+      <InfoCard
+        badge="Attribution"
+        title="Hover to see credits"
+        body="Redesigned sections show who styled them — your name appears after you contribute."
+      />
       <div className="welcome-step-visual welcome-step-visual--name">
         <label htmlFor="contributor-name" className="locked-intro-field-label">
           Your name
@@ -167,21 +239,9 @@ function StepVisual({
             {nameError}
           </p>
         ) : (
-          <p className="locked-intro-helper">Shown with your contributions after merge.</p>
+          <p className="locked-intro-helper">Required before the agent can publish for you.</p>
         )}
       </div>
-    );
-  }
-
-  return (
-    <div className="welcome-step-visual welcome-step-visual--hello">
-      <span className="portfolio-badge">
-        <span aria-hidden="true">🔒</span>
-        <span>Protected portfolio</span>
-      </span>
-      <p className="welcome-step-hello-copy">
-        A living portfolio workspace — community-built presentation, protected professional facts.
-      </p>
     </div>
   );
 }
@@ -290,7 +350,7 @@ function WelcomeIntroDialog() {
           <p className="welcome-steps-body">{step.body}</p>
 
           <StepVisual
-            variant={"variant" in step ? step.variant : undefined}
+            variant={step.variant}
             name={name}
             onNameChange={(value) => {
               setName(value);

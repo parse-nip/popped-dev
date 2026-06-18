@@ -456,16 +456,16 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
     setPublishError(null);
     setStatus("publishing");
 
-    try {
-      const nextChanges = await exportChangedFiles(container, originalFilesRef.current);
-      if (nextChanges.length === 0) throw new Error("No changes to publish.");
+    const nextChanges = await exportChangedFiles(container, originalFilesRef.current);
+    if (nextChanges.length === 0) throw new Error("No changes to publish.");
 
-      const summary =
-        editEvents[0]?.summary ??
-        `Updated ${nextChanges.length} file${nextChanges.length === 1 ? "" : "s"}`;
+    const summary =
+      editEvents[0]?.summary ??
+      `Updated ${nextChanges.length} file${nextChanges.length === 1 ? "" : "s"}`;
 
+    async function commitChanges(sha: string) {
       const result = await publishWorkspaceChanges({
-        baseSha,
+        baseSha: sha,
         changes: nextChanges,
         summary,
       });
@@ -473,6 +473,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       setCommitUrl(result.prUrl ?? result.commitUrl);
       setPublishStatus("deploying");
       setStatus("published");
+      setError(null);
 
       void (async () => {
         for (let i = 0; i < 30; i++) {
@@ -484,11 +485,42 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
           }
         }
       })();
+    }
+
+    try {
+      await commitChanges(baseSha);
     } catch (publishErr) {
       const message = publishErr instanceof Error ? publishErr.message : "Publish failed.";
+      const siteMoved =
+        message.includes("changed since you started") ||
+        message.includes("refresh design mode");
+
+      if (siteMoved) {
+        try {
+          setStatusDetail("Syncing with latest GitHub…");
+          const project = await fetchProjectFiles();
+          setBaseSha(project.baseSha);
+          await commitChanges(project.baseSha);
+          setStatusDetail(null);
+          return;
+        } catch (retryErr) {
+          const retryMessage =
+            retryErr instanceof Error ? retryErr.message : "Publish failed after sync.";
+          setPublishError(retryMessage);
+          setPublishStatus("failed");
+          setStatus("ready_to_publish");
+          setStatusDetail(null);
+          setError(
+            "Could not publish — the site changed on GitHub. Turn Design mode off and on, then try again.",
+          );
+          throw retryErr;
+        }
+      }
+
       setPublishError(message);
       setPublishStatus("failed");
-      setStatus("build_error");
+      setStatus("ready_to_publish");
+      setStatusDetail(null);
       setError(message);
       throw publishErr;
     }
