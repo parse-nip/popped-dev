@@ -1,8 +1,16 @@
-/**
- * Community design overrides — appended at publish time.
- * Do not edit locked facts; CSS-only presentation changes scoped to data-design-id.
- */
+#locked-resume [data-design-id="exp-agentfirst"], body [data-design-id="exp-agentfirst"] {
+  font-weight: 600;
+  color: #4a4a4a;
+}
 
-#locked-resume [data-design-id="hero.title"], body [data-design-id="hero.title"] {
-  text-align: center;
+#locked-resume [data-design-id="exp-agentfirst"]::before {
+  content: 'AI \u2022 ';
+  color: #667eea;
+  margin-right: 0.5rem;
+}
+
+#locked-resume [data-design-id="exp-edtech"]::before {
+  content: 'AI \u2022 ';
+  color: #667eea;
+  margin-right: 0.5rem;
 }
