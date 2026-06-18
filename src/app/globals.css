@@ -141,10 +141,10 @@
     @apply border-border outline-ring/50;
   }
   body {
-    background: #ffffff;
-    font-family: serif;
-    font-size: 16px;
-    line-height: 1.5;
+    background: var(--color-page);
+    font-family: var(--font-system);
+    font-size: var(--welcome-text-size);
+    letter-spacing: var(--welcome-letter-spacing);
     @apply text-foreground;
   }
   html {
@@ -1368,6 +1368,49 @@
     max-width: 40rem;
     margin: 0 auto;
     padding: 1rem 1.5rem 3rem;
+    font-family: serif;
+    font-size: 16px;
+    line-height: 1.5;
+    letter-spacing: normal;
+  }
+
+  #locked-resume h1,
+  #locked-resume h2,
+  #locked-resume h3 {
+    font: inherit;
+    font-weight: bold;
+  }
+
+  #locked-resume h1 {
+    font-size: 2em;
+    margin: 0 0 0.5em;
+  }
+
+  #locked-resume h2 {
+    font-size: 1.5em;
+    margin: 1.5em 0 0.5em;
+  }
+
+  #locked-resume h3 {
+    font-size: 1.17em;
+    margin: 1em 0 0.25em;
+  }
+
+  #locked-resume p,
+  #locked-resume ul {
+    margin: 0 0 0.75em;
+    padding: 0;
+    font: inherit;
+    line-height: 1.5;
+  }
+
+  #locked-resume ul {
+    list-style: disc;
+    padding-left: 1.5rem;
+  }
+
+  #locked-resume a {
+    color: inherit;
   }
 
   .design-select-overlay {
