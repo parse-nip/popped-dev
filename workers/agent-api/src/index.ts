@@ -34,7 +34,7 @@ import {
 } from "./pages-preview";
 import { branchForSession } from "./preview-url";
 import { resolveBranchDraft } from "./draft";
-import { classifyRequiresCodeChange, generateDesignPatch } from "./design-run";
+import { generateDesignPatch } from "./design-run";
 import { checkProductionDeploy } from "./design-deploy";
 import { getMainHeadSha, publishWithAttribution } from "./design-publish";
 import { validatePatch, type DesignPatch } from "./design-patch";
@@ -109,6 +109,8 @@ function parseSelectedElement(value: unknown): {
   tagName: string;
   text: string;
   selector: string;
+  sourceFile?: string;
+  hasFactId: boolean;
   computedStyle: Record<string, string>;
 } | null {
   if (!value || typeof value !== "object") return null;
@@ -132,6 +134,8 @@ function parseSelectedElement(value: unknown): {
     tagName: el.tagName,
     text: el.text.slice(0, 120),
     selector: el.selector,
+    sourceFile: typeof el.sourceFile === "string" ? el.sourceFile : undefined,
+    hasFactId: el.hasFactId === true,
     computedStyle,
   };
 }
@@ -142,7 +146,7 @@ function parseAcceptedPatches(value: unknown): DesignPatch[] {
   for (const item of value) {
     if (!item || typeof item !== "object") continue;
     const patch = item as DesignPatch;
-    if (patch.kind !== "css") continue;
+    if (patch.kind !== "edit") continue;
     try {
       validatePatch(patch);
       patches.push(patch);
@@ -447,8 +451,16 @@ function createPollRunStream(
             if (status === "ERROR") {
               emit("error", { message: "Agent run failed." });
             }
+            const branch = record.branch;
+            if (branch) {
+              await waitForPreviewDeploy(env, branch, emit, flags, record.baselineSha, 40);
+            }
             emit("done", {});
             break;
+          }
+
+          if (record.branch) {
+            await maybeEmitPreview(env, record.branch, emit, flags, record.baselineSha);
           }
 
           await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -552,6 +564,10 @@ function handleUpstreamSseEvent(
       status,
       prUrl: extractPrUrl(git) ?? undefined,
     });
+
+    if (branch) {
+      void waitForPreviewDeploy(env, branch, emit, flags, record.baselineSha, 40);
+    }
     return;
   }
 
@@ -614,14 +630,6 @@ app.post("/api/design/run", async (c) => {
 
   const acceptedPatches = parseAcceptedPatches(body.acceptedPatches);
 
-  if (classifyRequiresCodeChange(prompt)) {
-    return jsonError("requires_code_publish", 422, {
-      code: "requires_code_publish",
-      message:
-        "This change requires a code publish. CSS-only live preview is not available for structural or fact edits.",
-    });
-  }
-
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -632,7 +640,7 @@ app.post("/api/design/run", async (c) => {
 
       try {
         emit("status", { message: "Thinking…" });
-        emit("step", { id: "think", label: "Generating CSS patch", state: "running" });
+        emit("step", { id: "think", label: "Generating edit patch", state: "running" });
 
         const patch = await generateDesignPatch(c.env, {
           prompt,
@@ -1257,6 +1265,9 @@ app.get("/api/agent/runs/:runId/stream", async (c) => {
           if (isTerminalRunStatus(status)) {
             if (status === "ERROR") {
               emit("error", { message: "Agent run failed." });
+            }
+            if (record.branch) {
+              await waitForPreviewDeploy(c.env, record.branch, emit, flags, record.baselineSha, 40);
             }
             emit("done", {});
           }

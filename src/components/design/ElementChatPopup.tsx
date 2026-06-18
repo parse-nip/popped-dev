@@ -595,7 +595,7 @@ export function ElementChatPopup({
           </span>
         )}
 
-        <span className="element-chat-popup-model">CSS patch mode</span>
+        <span className="element-chat-popup-model">Live preview</span>
 
         {phase === "input" ? (
           <button

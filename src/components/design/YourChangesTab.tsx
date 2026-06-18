@@ -113,7 +113,7 @@ export function YourChangesTab() {
         <div className="your-changes-panel-header">
           <p className="your-changes-panel-title">Your changes</p>
           <p className="your-changes-panel-subtitle">
-            Accepted patches preview locally. Publish sends them to GitHub once.
+            Accepted changes preview instantly. Publish commits them to GitHub once.
           </p>
         </div>
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { ElementChatPopup } from "@/components/design/ElementChatPopup";
 import { DraftConfirmBadge } from "@/components/design/DraftConfirmBadge";
-import { buildElementContext } from "@/lib/element-context";
+import { buildElementContext, ensureDesignIdOnElement } from "@/lib/element-context";
 import { getElementLabel, getSelectableElement } from "@/lib/element-label";
 
 const HIGHLIGHT_INSET = 6;
@@ -135,6 +135,7 @@ export function DesignSelectLayerActive() {
       event.stopPropagation();
 
       const label = getElementLabel(element);
+      ensureDesignIdOnElement(element);
       setChat({ element, label });
       setHover({ element, label });
     }

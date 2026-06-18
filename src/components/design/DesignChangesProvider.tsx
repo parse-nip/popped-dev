@@ -105,7 +105,7 @@ export function DesignChangesProvider({ children }: { children: ReactNode }) {
           }
         })
         .catch(() => {
-          // keep polling — deploy may still be building
+          // keep polling
         });
     };
 

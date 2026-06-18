@@ -1,53 +1,42 @@
-export type DesignPatch = {
-  id: string;
-  kind: "css";
-  target: {
-    designId: string;
-    selector: string;
-  };
-  css: string;
-  summary: string;
-};
+import {
+  DESIGN_OVERRIDES_PATH,
+  designIdSelector,
+  isAllowedRepoPath,
+  operationsToCssBlock,
+  type DesignPatch,
+} from "../../../shared/edit-operations";
+
+export type { DesignPatch, EditOperation, RepoFilePatch } from "../../../shared/edit-operations";
+export {
+  createPatchId,
+  designSelector,
+  designIdSelector,
+  DESIGN_OVERRIDES_PATH,
+  operationsToCssBlock,
+} from "../../../shared/edit-operations";
 
 export type SelectedElementPayload = {
   designId: string;
   tagName: string;
   text: string;
   selector: string;
+  sourceFile?: string;
+  hasFactId: boolean;
   computedStyle: Record<string, string>;
 };
 
-const BANNED_CSS_TOKENS = [
-  "@import",
-  "url(",
-  "body",
-  "html",
-  "* {",
-  "position: fixed",
-];
-
-export function designSelector(designId: string): string {
-  return `[data-design-id="${designId}"]`;
-}
-
 export function validatePatch(patch: DesignPatch): void {
-  if (patch.kind !== "css") {
-    throw new Error("Only CSS patches are supported");
+  if (patch.kind !== "edit") {
+    throw new Error("Only edit patches are supported");
   }
 
-  if (!patch.css.includes(designSelector(patch.target.designId))) {
-    throw new Error("CSS must be scoped to selected designId");
-  }
-
-  const lower = patch.css.toLowerCase();
-  for (const token of BANNED_CSS_TOKENS) {
-    if (lower.includes(token)) {
-      throw new Error(`Disallowed CSS token: ${token}`);
+  for (const file of patch.repo.files) {
+    if (!isAllowedRepoPath(file.path)) {
+      throw new Error(`Disallowed repo path: ${file.path}`);
     }
-  }
-
-  if (patch.css.length > 5000) {
-    throw new Error("CSS patch too large");
+    if (file.cssBlock && !file.cssBlock.includes(designIdSelector(patch.target.designId))) {
+      throw new Error("Repo CSS must be scoped to designId");
+    }
   }
 }
 
@@ -56,46 +45,71 @@ export function parseDesignPatch(value: unknown): DesignPatch | null {
   const patch = value as Partial<DesignPatch>;
   if (
     typeof patch.id !== "string" ||
-    patch.kind !== "css" ||
+    patch.kind !== "edit" ||
     !patch.target ||
     typeof patch.target.designId !== "string" ||
-    typeof patch.target.selector !== "string" ||
-    typeof patch.css !== "string" ||
-    typeof patch.summary !== "string"
+    typeof patch.summary !== "string" ||
+    !patch.preview ||
+    !Array.isArray(patch.preview.operations) ||
+    !patch.repo ||
+    !Array.isArray(patch.repo.files)
   ) {
     return null;
   }
   return patch as DesignPatch;
 }
 
-export function createPatchBlock(patch: DesignPatch): string {
-  return `/* popped.design:start id=${patch.id} */
-${patch.css.trim()}
-/* popped.design:end id=${patch.id} */`;
+export function createPatchBlock(patchId: string, css: string): string {
+  return `/* popped.design:start id=${patchId} */
+${css.trim()}
+/* popped.design:end id=${patchId} */`;
 }
 
-export function mergePatchesIntoCss(existing: string, patches: DesignPatch[]): string {
+export function mergeCssBlock(existing: string, patchId: string, cssBlock: string): string {
+  let content = existing.trim();
+  const start = `/* popped.design:start id=${patchId} */`;
+  const end = `/* popped.design:end id=${patchId} */`;
+  const block = createPatchBlock(patchId, cssBlock);
+  const startIdx = content.indexOf(start);
+  if (startIdx !== -1) {
+    const endIdx = content.indexOf(end, startIdx);
+    if (endIdx !== -1) {
+      content =
+        content.slice(0, startIdx).trimEnd() +
+        "\n\n" +
+        block +
+        content.slice(endIdx + end.length).trimStart();
+      return `${content.trim()}\n`;
+    }
+  }
+  content = content ? `${content}\n\n${block}` : block;
+  return `${content.trim()}\n`;
+}
+
+/** Merge all patch repo CSS + generated CSS from operations into design-overrides.css */
+export function mergeAllPatchCss(existing: string, patches: DesignPatch[]): string {
   let content = existing.trim();
   for (const patch of patches) {
-    const start = `/* popped.design:start id=${patch.id} */`;
-    const end = `/* popped.design:end id=${patch.id} */`;
-    const block = createPatchBlock(patch);
-    const startIdx = content.indexOf(start);
-    if (startIdx !== -1) {
-      const endIdx = content.indexOf(end, startIdx);
-      if (endIdx !== -1) {
-        content =
-          content.slice(0, startIdx).trimEnd() +
-          "\n\n" +
-          block +
-          content.slice(endIdx + end.length).trimStart();
-        content = content.trim();
-        continue;
+    let merged = false;
+    for (const file of patch.repo.files) {
+      if (file.path === DESIGN_OVERRIDES_PATH && file.cssBlock) {
+        content = mergeCssBlock(content, patch.id, file.cssBlock);
+        merged = true;
       }
     }
-    content = content ? `${content}\n\n${block}` : block;
+    if (!merged) {
+      const generated = operationsToCssBlock(patch.preview.operations, patch.target.designId);
+      if (generated) {
+        content = mergeCssBlock(content, patch.id, generated);
+      }
+    }
   }
   return `${content.trim()}\n`;
 }
 
-export const DESIGN_OVERRIDES_PATH = "src/app/design-overrides.css";
+export function createPatchBlockLegacy(patch: DesignPatch): string {
+  const css =
+    patch.repo.files.find((f) => f.path === DESIGN_OVERRIDES_PATH)?.cssBlock ??
+    operationsToCssBlock(patch.preview.operations, patch.target.designId);
+  return createPatchBlock(patch.id, css);
+}

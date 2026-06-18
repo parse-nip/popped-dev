@@ -1,13 +1,24 @@
-export type DesignPatch = {
-  id: string;
-  kind: "css";
-  target: {
-    designId: string;
-    selector: string;
-  };
-  css: string;
-  summary: string;
-};
+import type { DesignPatch, DesignPatchTarget } from "@shared/edit-operations";
+import {
+  applyPreviewOperations,
+  clearAllPreviewPatches,
+  reapplyPreviewPatches,
+  removePreviewPatch,
+} from "@/lib/preview-engine";
+
+export type {
+  DesignPatch,
+  DesignPatchTarget,
+  EditOperation,
+  RepoFilePatch,
+} from "@shared/edit-operations";
+
+export {
+  createPatchId,
+  designIdSelector,
+  designSelector,
+  DESIGN_OVERRIDES_PATH,
+} from "@shared/edit-operations";
 
 export type DesignPublishStatus =
   | "idle"
@@ -22,108 +33,45 @@ export type SelectedElementPayload = {
   tagName: string;
   text: string;
   selector: string;
+  sourceFile?: string;
+  hasFactId: boolean;
   computedStyle: Record<string, string>;
 };
 
-const BANNED_CSS_TOKENS = [
-  "@import",
-  "url(",
-  "body",
-  "html",
-  "* {",
-  "position: fixed",
-];
-
-export function designSelector(designId: string): string {
-  return `[data-design-id="${designId}"]`;
-}
-
 export function validatePatch(patch: DesignPatch): void {
-  if (patch.kind !== "css") {
-    throw new Error("Only CSS patches are supported");
+  if (patch.kind !== "edit") {
+    throw new Error("Only edit patches are supported");
   }
 
-  if (!patch.css.includes(designSelector(patch.target.designId))) {
-    throw new Error("CSS must be scoped to selected designId");
+  if (!patch.id || !patch.summary) {
+    throw new Error("Patch missing id or summary");
   }
 
-  const lower = patch.css.toLowerCase();
-  for (const token of BANNED_CSS_TOKENS) {
-    if (lower.includes(token)) {
-      throw new Error(`Disallowed CSS token: ${token}`);
-    }
+  if (!Array.isArray(patch.preview.operations)) {
+    throw new Error("Patch missing preview operations");
   }
 
-  if (patch.css.length > 5000) {
-    throw new Error("CSS patch too large");
+  if (!Array.isArray(patch.repo.files)) {
+    throw new Error("Patch missing repo files");
+  }
+
+  if (patch.preview.operations.length === 0 && patch.repo.files.length === 0) {
+    throw new Error("Patch has no preview or repo changes");
   }
 }
-
-const DRAFT_STYLE_ID = "popped-design-draft-style";
 
 export function applyDraftPatch(patch: DesignPatch): void {
-  if (typeof document === "undefined") return;
-
-  let style = document.getElementById(DRAFT_STYLE_ID) as HTMLStyleElement | null;
-  if (!style) {
-    style = document.createElement("style");
-    style.id = DRAFT_STYLE_ID;
-    style.dataset.poppedDraft = "true";
-    document.head.appendChild(style);
-  }
-
-  const withoutPatch = removePatchBlock(style.textContent ?? "", patch.id);
-  style.textContent = `${withoutPatch}\n/* ${patch.id} */\n${patch.css}\n`.trimStart();
+  applyPreviewOperations(patch.preview.operations, patch.id);
 }
 
 export function removeDraftPatch(patchId: string): void {
-  if (typeof document === "undefined") return;
-
-  const style = document.getElementById(DRAFT_STYLE_ID) as HTMLStyleElement | null;
-  if (!style) return;
-
-  const next = removePatchBlock(style.textContent ?? "", patchId).trim();
-  if (!next) {
-    style.remove();
-    return;
-  }
-  style.textContent = next;
+  removePreviewPatch(patchId);
 }
 
 export function clearAllDraftPatches(): void {
-  if (typeof document === "undefined") return;
-  document.getElementById(DRAFT_STYLE_ID)?.remove();
+  clearAllPreviewPatches();
 }
 
 export function reapplyDraftPatches(patches: DesignPatch[]): void {
-  clearAllDraftPatches();
-  for (const patch of patches) {
-    applyDraftPatch(patch);
-  }
-}
-
-function removePatchBlock(css: string, patchId: string): string {
-  const marker = `/* ${patchId} */`;
-  const start = css.indexOf(marker);
-  if (start === -1) return css;
-
-  const before = css.slice(0, start).trimEnd();
-  const afterStart = start + marker.length;
-  const nextMarker = css.indexOf("\n/* patch_", afterStart);
-  const nextGeneric = css.indexOf("\n/* ", afterStart + 1);
-  let end = css.length;
-
-  if (nextMarker !== -1) {
-    end = nextMarker;
-  } else if (nextGeneric !== -1 && nextGeneric > afterStart) {
-    end = nextGeneric;
-  }
-
-  const after = css.slice(end).trimStart();
-  return [before, after].filter(Boolean).join("\n");
-}
-
-export function createPatchId(designId: string): string {
-  const slug = designId.replace(/[^a-z0-9.]+/gi, "_").slice(0, 40);
-  return `patch_${slug}_${Date.now().toString(36)}`;
+  reapplyPreviewPatches(patches);
 }

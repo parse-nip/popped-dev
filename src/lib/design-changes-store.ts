@@ -8,7 +8,7 @@ export type DesignState = {
   pendingPatch: DesignPatch | null;
   acceptedPatches: DesignPatch[];
   rejectedPatches: DesignPatch[];
-  /** Keeps draft CSS visible after publish until Cloudflare deploys. */
+  /** Keeps draft preview visible after publish until Cloudflare deploys. */
   deployHoldPatches: DesignPatch[];
   publishedSha: string | null;
   publishStatus: DesignPublishStatus;
@@ -116,44 +116,4 @@ export function formatChangeAge(timestamp: number): string {
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   return `${hours} hr ago`;
-}
-
-/** @deprecated Use readDesignState — kept for transitional imports */
-export type DesignChangeDeployStatus = "working" | "ready" | "failed";
-
-/** @deprecated Use DesignPatch via readDesignState */
-export type DesignChange = {
-  runId: string;
-  agentId: string;
-  branch: string;
-  prompt: string;
-  elementLabel: string;
-  baselineSha?: string | null;
-  createdAt: number;
-  deployStatus: DesignChangeDeployStatus;
-  previewSha?: string | null;
-};
-
-export function deployStatusLabel(_status: DesignChangeDeployStatus): string {
-  return "Ready to confirm";
-}
-
-export function readDesignChanges(): DesignChange[] {
-  return [];
-}
-
-export function upsertDesignChange(): DesignChange[] {
-  return [];
-}
-
-export function updateDesignChange(): DesignChange[] {
-  return [];
-}
-
-export function clearDesignChanges(sessionId = readSessionId()): void {
-  clearDesignState(sessionId);
-}
-
-export function subscribeDesignChanges(onChange: () => void): () => void {
-  return subscribeDesignState(onChange);
 }

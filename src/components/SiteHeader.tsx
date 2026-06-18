@@ -34,7 +34,12 @@ export function SiteHeader() {
   const designLockedOn = isAgentBusy && isDesignMode;
 
   return (
-    <header className="site-header" data-design-select-ui>
+    <header
+      className="site-header"
+      data-design-id="site-header"
+      data-source-file="src/components/SiteHeader.tsx"
+      data-design-select-ui
+    >
       <Link href="/" className="site-header-wordmark">
         popped.dev
       </Link>

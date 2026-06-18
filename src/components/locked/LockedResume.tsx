@@ -13,6 +13,7 @@ export function LockedResume() {
       id="locked-resume"
       data-facts="true"
       data-design-id="resume.root"
+      data-source-file="src/components/locked/LockedResume.tsx"
       aria-label="Portfolio facts"
     >
       <article className="locked-resume">

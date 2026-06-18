@@ -6,6 +6,8 @@ export type ElementContext = {
   designId: string;
   selector: string;
   selectorPath: string;
+  sourceFile?: string;
+  hasFactId: boolean;
   factId?: string;
   contributionId?: string;
   tagName: string;
@@ -100,6 +102,15 @@ function getTextPreview(element: Element, maxLength = 80): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+export function ensureDesignIdOnElement(element: Element): string {
+  const explicit = element.getAttribute("data-design-id");
+  if (explicit) return explicit;
+
+  const designId = resolveDesignId(element);
+  element.setAttribute("data-design-id", designId);
+  return designId;
+}
+
 function resolveDesignId(element: Element): string {
   const explicit = element.getAttribute("data-design-id");
   if (explicit) return explicit;
@@ -140,12 +151,17 @@ export function buildElementContext(element: Element): ElementContext {
   const factId = element.getAttribute("data-fact-id") ?? undefined;
   const contributionId = element.getAttribute("data-contribution-id") ?? undefined;
   const designId = resolveDesignId(element);
+  const sourceFile =
+    element.getAttribute("data-source-file") ??
+    getSuggestedFiles(label, factId, contributionId)[0];
 
   return {
     label,
     designId,
     selector: designSelector(designId),
     selectorPath: getSelectorPath(element),
+    sourceFile,
+    hasFactId: Boolean(factId),
     factId,
     contributionId,
     tagName: element.tagName.toLowerCase(),
@@ -162,6 +178,8 @@ export function toSelectedElementPayload(context: ElementContext) {
     tagName: context.tagName,
     text: context.textPreview,
     selector: context.selector,
+    sourceFile: context.sourceFile,
+    hasFactId: context.hasFactId,
     computedStyle: context.computedStyle,
   };
 }
