@@ -9,6 +9,7 @@ import {
 } from "./design-support";
 import { patchPackageJsonForWebContainer } from "./patch-project-for-webcontainer";
 import { pickAgentContextFiles } from "@shared/agent-context-files";
+import { createInstallProgressReporter } from "./install-progress";
 
 export { startDevServer } from "./dev-server";
 
