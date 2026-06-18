@@ -42,20 +42,33 @@ function getSuggestedFiles(
   label: string,
   factId?: string,
   contributionId?: string,
+  sourceFile?: string,
 ): string[] {
+  const appShell = ["src/app/layout.tsx", "src/app/page.tsx"];
+  const styling = ["src/app/globals.css", "src/app/design-overrides.css"];
+  const editableSource =
+    sourceFile && !sourceFile.includes("experience.json") && !sourceFile.includes("LockedIntro")
+      ? sourceFile
+      : null;
+
   if (factId || label === "ProtectedFact") {
-    return ["src/app/design-overrides.css"];
+    return [
+      editableSource ?? "src/components/locked/LockedResume.tsx",
+      ...styling,
+    ];
   }
 
   if (contributionId || label === "StyledElement") {
-    return ["src/app/design-overrides.css"];
+    return editableSource ? [editableSource, ...styling, ...appShell] : [...styling, ...appShell];
   }
 
   if (label === "SemanticHeader" || label === "SemanticNav") {
-    return ["src/app/design-overrides.css", "src/components/SiteHeader.tsx"];
+    return ["src/components/SiteHeader.tsx", ...appShell, ...styling];
   }
 
-  return ["src/app/design-overrides.css"];
+  return editableSource
+    ? [editableSource, ...appShell, ...styling]
+    : [...appShell, ...styling];
 }
 
 function getSelectorPath(element: Element): string {
@@ -151,9 +164,9 @@ export function buildElementContext(element: Element): ElementContext {
   const factId = element.getAttribute("data-fact-id") ?? undefined;
   const contributionId = element.getAttribute("data-contribution-id") ?? undefined;
   const designId = resolveDesignId(element);
-  const sourceFile =
-    element.getAttribute("data-source-file") ??
-    getSuggestedFiles(label, factId, contributionId)[0];
+  const sourceFileAttr = element.getAttribute("data-source-file") ?? undefined;
+  const suggestedFiles = getSuggestedFiles(label, factId, contributionId, sourceFileAttr);
+  const sourceFile = sourceFileAttr ?? suggestedFiles[0];
 
   return {
     label,
@@ -167,7 +180,7 @@ export function buildElementContext(element: Element): ElementContext {
     tagName: element.tagName.toLowerCase(),
     classNames: Array.from(element.classList),
     textPreview: getTextPreview(element),
-    suggestedFiles: getSuggestedFiles(label, factId, contributionId),
+    suggestedFiles,
     computedStyle: readComputedStyle(element),
   };
 }

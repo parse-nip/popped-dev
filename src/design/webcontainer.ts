@@ -8,21 +8,21 @@ import {
   getDesignModeBlockReason,
 } from "./design-support";
 import { patchPackageJsonForWebContainer } from "./patch-project-for-webcontainer";
-import {
-  createInstallProgressReporter,
-  NpmInstallProgressTracker,
-} from "./install-progress";
+import { pickAgentContextFiles } from "@shared/agent-context-files";
 
 export { startDevServer } from "./dev-server";
 
 let webcontainerPromise: Promise<WebContainer> | null = null;
 let webcontainerInstance: WebContainer | null = null;
 
-const TRACKED_PREFIXES = ["src/", "public/", "shared/", "src/app/design-overrides.css"];
+const TRACKED_PREFIXES = ["src/", "public/", "shared/", "scripts/"];
 const TRACKED_ROOT_FILES = new Set([
+  "package.json",
   "next.config.ts",
   "postcss.config.mjs",
   "components.json",
+  "tsconfig.json",
+  "eslint.config.mjs",
 ]);
 
 export type WorkspaceSession = {
@@ -254,29 +254,7 @@ export function pickContextFiles(
   allFiles: Record<string, string>,
   extraPaths: string[] = [],
 ): Record<string, string> {
-  const paths = new Set<string>([
-    "package.json",
-    "src/app/globals.css",
-    "src/app/design-overrides.css",
-    "src/components/SiteHeader.tsx",
-    "src/components/locked/LockedResume.tsx",
-    "src/locked/experience.json",
-    "src/components/community/ResumeQuickLinks.tsx",
-    ...extraPaths,
-  ]);
-
-  const picked: Record<string, string> = {};
-  for (const path of paths) {
-    if (allFiles[path]) picked[path] = allFiles[path];
-  }
-
-  if (Object.keys(picked).length === 0) {
-    for (const [path, content] of Object.entries(allFiles).slice(0, 6)) {
-      picked[path] = content;
-    }
-  }
-
-  return picked;
+  return pickAgentContextFiles(allFiles, extraPaths);
 }
 
 export { isCrossOriginIsolated } from "./design-support";

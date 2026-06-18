@@ -1,7 +1,5 @@
-import {
-  findLockedFactViolations,
-  isLockedFactPath,
-} from "../../../shared/locked-fact-files";
+import { isEditableWorkspacePath } from "../../../shared/editable-workspace-paths";
+import { findLockedFactViolations } from "../../../shared/locked-fact-files";
 import { createPullRequest } from "./github";
 import { getMainHeadSha } from "./repo-publish";
 import type { Env } from "./types";
@@ -38,22 +36,12 @@ function encodeBase64Utf8(text: string): string {
 }
 
 function isAllowedWorkspacePath(path: string): boolean {
-  if (isLockedFactPath(path)) return false;
-  if (path.startsWith("workers/")) return false;
-  if (path.startsWith(".cursor/")) return false;
-  if (path.startsWith("src/")) return true;
-  if (path.startsWith("public/")) return true;
-  if (path.startsWith("shared/")) return true;
-  if (path === "src/app/design-overrides.css") return true;
-  if (/^(package\.json|package-lock\.json|next\.config\.ts|tsconfig\.json|postcss\.config\.mjs|components\.json)$/.test(path)) {
-    return true;
-  }
-  return false;
+  return isEditableWorkspacePath(path);
 }
 
 async function createMultiFileCommit(
   env: Env,
-  files: Array<{ path: string; content: string }>,
+  changes: FileChange[],
   message: string,
   branch: string,
 ): Promise<{ sha: string; url: string }> {
@@ -78,22 +66,31 @@ async function createMultiFileCommit(
   if (!commitRes.ok) throw new Error("Could not read base commit");
   const commitData = (await commitRes.json()) as { tree: { sha: string } };
 
-  const treeEntries = [];
-  for (const file of files) {
+  const treeEntries: Array<
+    | { path: string; mode: "100644"; type: "blob"; sha: string }
+    | { path: string; sha: null }
+  > = [];
+
+  for (const change of changes) {
+    if (change.action === "delete") {
+      treeEntries.push({ path: change.path, sha: null });
+      continue;
+    }
+
     const blobRes = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/git/blobs`, {
       method: "POST",
       headers,
       body: JSON.stringify({
-        content: encodeBase64Utf8(file.content),
+        content: encodeBase64Utf8(change.content),
         encoding: "base64",
       }),
     });
-    if (!blobRes.ok) throw new Error(`Blob create failed for ${file.path}`);
+    if (!blobRes.ok) throw new Error(`Blob create failed for ${change.path}`);
     const blob = (await blobRes.json()) as { sha: string };
     treeEntries.push({
-      path: file.path,
-      mode: "100644" as const,
-      type: "blob" as const,
+      path: change.path,
+      mode: "100644",
+      type: "blob",
       sha: blob.sha,
     });
   }
@@ -203,9 +200,6 @@ export async function publishWorkspaceChanges(
   }
 
   for (const change of changes) {
-    if (change.action === "delete") {
-      throw new Error(`File deletion not supported in MVP: ${change.path}`);
-    }
     if (!isAllowedWorkspacePath(change.path)) {
       throw new Error(`Disallowed publish path: ${change.path}`);
     }
@@ -218,19 +212,10 @@ export async function publishWorkspaceChanges(
     `Design workspace publish (${changes.length} file${changes.length === 1 ? "" : "s"})`;
   const message = `Design: ${summary} (by ${params.contributorName})`;
 
-  const fileUpdates = changes
-    .filter((c) => c.action !== "delete")
-    .map((c) => ({ path: c.path, content: c.content }));
-
   if (publishMode === "pr") {
     const branchName = `design/workspace-${Date.now().toString(36)}`;
     await ensureBranch(env, branchName, params.baseSha);
-    const { sha, url } = await createMultiFileCommit(
-      env,
-      fileUpdates,
-      message,
-      branchName,
-    );
+    const { sha, url } = await createMultiFileCommit(env, changes, message, branchName);
     const prUrl = await createPullRequest(env.GITHUB_TOKEN, env.GITHUB_REPO_URL, {
       branch: branchName,
       base: baseBranch,
@@ -240,11 +225,6 @@ export async function publishWorkspaceChanges(
     return { commitUrl: url, sha, branch: branchName, prUrl, changedPaths };
   }
 
-  const { sha, url } = await createMultiFileCommit(
-    env,
-    fileUpdates,
-    message,
-    baseBranch,
-  );
+  const { sha, url } = await createMultiFileCommit(env, changes, message, baseBranch);
   return { commitUrl: url, sha, branch: baseBranch, changedPaths };
 }

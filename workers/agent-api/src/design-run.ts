@@ -51,7 +51,7 @@ Return ONLY valid JSON (no markdown fences):
 }
 
 Allowed operation types: style, class_toggle, visibility, insert_image, spacing.
-Allowed repo paths: src/app/design-overrides.css, src/components/SiteHeader.tsx, public/assets/*.svg
+Allowed repo paths: any editable project path (src/** except src/locked/* and LockedIntro.tsx, public/**, shared/**, scripts/**, root configs). You may create new files and edit multiple files.
 NEVER change locked fact text (elements with hasFactId). Style-only on facts.
 Preview may use important:true on styles. Repo CSS must be clean (no !important).
 For logos: preview insert_image with data URI; repo adds TSX img + public/assets/popped-logo.svg + CSS.

@@ -23,8 +23,9 @@ export function DesignStatusMessage() {
   if (!message) return null;
 
   const isError = status === "build_error" || status === "edit_rejected";
+  const isDeploySuccess = publishStatus === "deployed";
   const toneClass =
-    statusBarTone === "approved"
+    statusBarTone === "approved" || isDeploySuccess
       ? " design-status-bar--approved"
       : statusBarTone === "approving"
         ? " design-status-bar--approving"
@@ -39,10 +40,10 @@ export function DesignStatusMessage() {
       aria-live="polite"
       data-design-select-ui
     >
-      {!isError && statusBarTone !== "approved" ? (
+      {!isError && statusBarTone !== "approved" && !isDeploySuccess ? (
         <span className="design-status-bar-dot" aria-hidden="true" />
       ) : null}
-      {statusBarTone === "approved" ? (
+      {statusBarTone === "approved" || isDeploySuccess ? (
         <span className="design-status-bar-check" aria-hidden="true">
           ✓
         </span>

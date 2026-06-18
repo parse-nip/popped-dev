@@ -51,20 +51,23 @@ export function SiteHeader() {
     (status === "ready_to_publish" ||
       publishStatus === "publishing" ||
       publishStatus === "deploying" ||
+      publishStatus === "deployed" ||
       publishStatus === "published");
 
-  const publishWaitingForPreview = showHeaderPublish && !showLivePreview && publishStatus !== "published";
+  const publishWaitingForPreview = showHeaderPublish && !showLivePreview && publishStatus !== "published" && publishStatus !== "deployed";
 
   const publishLabel =
     publishStatus === "publishing"
       ? "Publishing…"
       : publishStatus === "deploying"
         ? "Deploying…"
-        : publishStatus === "published" && commitUrl
-          ? "View on GitHub"
-          : publishWaitingForPreview
-            ? "Waiting for preview…"
-            : "Publish to GitHub";
+        : publishStatus === "deployed"
+          ? "Deployed ✓"
+          : publishStatus === "published" && commitUrl
+            ? "View on GitHub"
+            : publishWaitingForPreview
+              ? "Waiting for preview…"
+              : "Publish to GitHub";
 
   const publishTitle =
     publishWaitingForPreview
@@ -73,9 +76,11 @@ export function SiteHeader() {
         ? "Committing your styling changes to GitHub"
         : publishStatus === "deploying"
           ? "Cloudflare is deploying your commit to popped.dev"
-          : publishStatus === "published" && commitUrl
-            ? "Open your commit on GitHub"
-            : "Commit your styling changes to GitHub and deploy to popped.dev";
+          : publishStatus === "deployed"
+            ? "Your changes are live — reloading…"
+            : publishStatus === "published" && commitUrl
+              ? "Open your commit on GitHub"
+              : "Commit your styling changes to GitHub and deploy to popped.dev";
 
   async function handleHeaderPublish() {
     if (publishStatus === "published" && commitUrl) {
@@ -112,6 +117,7 @@ export function SiteHeader() {
             disabled={
               publishStatus === "publishing" ||
               publishStatus === "deploying" ||
+              publishStatus === "deployed" ||
               publishWaitingForPreview
             }
             onClick={() => void handleHeaderPublish()}

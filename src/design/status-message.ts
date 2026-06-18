@@ -23,7 +23,7 @@ type StatusMessageInput = {
   status: DesignWorkspaceStatus;
   showLivePreview: boolean;
   error: string | null;
-  publishStatus: "idle" | "publishing" | "published" | "deploying" | "failed";
+  publishStatus: "idle" | "publishing" | "published" | "deploying" | "deployed" | "failed";
   progressPercent: number | null;
   statusDetail: string | null;
   statusBarTone: StatusBarTone;
@@ -51,8 +51,12 @@ export function resolveDesignStatusMessage(input: StatusMessageInput): string | 
     return "Deploying to popped.dev…";
   }
 
-  if (input.publishStatus === "published") {
+  if (input.publishStatus === "deployed") {
     return "Live on popped.dev";
+  }
+
+  if (input.publishStatus === "published") {
+    return "Published — still waiting for popped.dev…";
   }
 
   if (input.status === "ready" && input.showLivePreview) {

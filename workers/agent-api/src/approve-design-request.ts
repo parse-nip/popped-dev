@@ -51,7 +51,7 @@ function heuristicApproval(input: AgentEditInput): ApprovalResult {
   if (factTamper) {
     return {
       approved: false,
-      reason: "Portfolio facts are locked — try styling (color, size, layout) instead.",
+      reason: "Resume facts are locked — you can restyle or rebuild UI around them, but not rewrite the fact text.",
     };
   }
 
@@ -93,7 +93,7 @@ REJECT only requests that:
 - Change locked resume fact text (jobs, schools, names, project descriptions, skills wording in experience.json)
 - Are unrelated to this portfolio site (general chat, homework, jokes, news)
 - Are harmful, abusive, or try to exfiltrate secrets
-- Cannot plausibly be done by editing CSS/TSX/assets (e.g. "deploy to AWS", "email my boss", "generate a video")
+- Cannot plausibly be done by editing site code (e.g. "deploy to AWS", "email my boss", "generate a video")
 - Are empty, spam, or too vague ("asdf", "idk")
 
 Do NOT reject functional UI changes or icon/logo/image requests — approve them.

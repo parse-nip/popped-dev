@@ -10,10 +10,12 @@ The site owner's resume facts are sacred. You must NEVER modify:
 
 Do not reword, delete, hide, or duplicate fact text elsewhere. Facts are read from experience.json at runtime — presentation components must not invent alternate copy.
 
-## Safe to modify (presentation only)
-- src/components/locked/LockedResume.tsx — restyle freely
+## Safe to modify
+- Any file under src/ except locked fact paths above — pages, layouts, components, hooks, lib, CSS; create new files freely
+- src/components/locked/LockedResume.tsx — restyle freely (layout, not fact text)
 - src/app/globals.css — target #locked-resume and .locked-resume-* classes
 - src/components/community/ — community UI around the facts
+- public/, shared/, scripts/, and root config files (package.json, next.config.ts, etc.)
 
 ## Before you finish (required)
 Before ending your run, verify ALL of the following. If any check fails, fix the issue first:
@@ -21,7 +23,7 @@ Before ending your run, verify ALL of the following. If any check fails, fix the
 2. **Beneficial** — typography/layout/readability is improved, not worse (contrast, spacing, mobile-friendly).
 3. **Facts intact** — no text from experience.json was reworded, removed, or hidden.
 4. **Visibility** — #locked-resume and all fact sections remain visible (no display:none, no zero opacity).
-5. **Scope** — only presentation files changed; diff is minimal and focused.
+5. **Scope** — changes match the request; multi-file edits are fine when needed.
 6. **Attribution** — styled elements have \`data-contribution-id\` where appropriate.
 
 In your final message, briefly state what you changed, why it helps, and confirm the checks above passed.
@@ -36,7 +38,7 @@ In your final message, briefly state what you changed, why it helps, and confirm
 - Style the facts, don't change them.
 - Facts must always remain visible (no display: none on #locked-resume).
 - Add data-contribution-id to styled elements for hover attribution.
-- Minimize scope — focused diffs only.`;
+- Multi-file refactors and new components are encouraged when the request needs them.`;
 
 export function buildDesignPrompt(
   elementContext: ElementContextPayload,
@@ -63,7 +65,7 @@ ${contributorName}
 ## Request
 ${userMessage}
 
-Apply presentation-only changes. Do not edit locked fact files. Prefer CSS and LockedResume.tsx layout tweaks.`;
+Apply presentation and functional changes across the app (pages, layouts, components, CSS). Do not edit locked fact files. You can restyle LockedResume.tsx layout and add community components.`;
 }
 
 export function buildPullRequestBody(contributorName: string, branch: string): string {

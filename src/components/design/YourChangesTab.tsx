@@ -18,8 +18,9 @@ export function YourChangesTab() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   const isDeploying = publishStatus === "deploying";
+  const isDeployed = publishStatus === "deployed";
   const isPublished = publishStatus === "published";
-  const hasChanges = changes.length > 0 || isDeploying || isPublished || Boolean(commitUrl);
+  const hasChanges = changes.length > 0 || isDeploying || isDeployed || isPublished || Boolean(commitUrl);
 
   useEffect(() => {
     if (!open) return;
@@ -79,8 +80,8 @@ export function YourChangesTab() {
           <p className="your-changes-publish-guide-title">What Publish to GitHub does</p>
           <ol className="your-changes-publish-guide-list">
             <li>Commits your styling changes to the repo (not locked resume facts).</li>
-            <li>Cloudflare rebuilds popped.dev — the button shows Deploying… for a minute or two.</li>
-            <li>When done, it becomes View on GitHub so you can open the commit.</li>
+            <li>Cloudflare rebuilds popped.dev — the button shows Deploying… until it goes live.</li>
+            <li>When deploy finishes you’ll see a green checkmark, then the page reloads with your changes.</li>
           </ol>
         </div>
 
@@ -112,6 +113,12 @@ export function YourChangesTab() {
 
         {isDeploying ? (
           <p className="your-changes-status">Deploying to popped.dev…</p>
+        ) : null}
+
+        {isDeployed ? (
+          <p className="your-changes-status your-changes-status--ready">
+            <span aria-hidden="true">✓</span> Live on popped.dev — reloading…
+          </p>
         ) : null}
       </div>
     </div>

@@ -199,13 +199,22 @@ export async function publishWorkspaceChanges(input: {
   return payload;
 }
 
-export async function pollDeployStatus(sha: string): Promise<{ live: boolean; state?: string }> {
+export async function pollDeployStatus(
+  sha: string,
+): Promise<{ live: boolean; phase?: string; progress?: number }> {
   const response = await fetch(apiUrl(`/api/design/deploy-status?sha=${encodeURIComponent(sha)}`));
-  const payload = (await response.json()) as { live?: boolean; state?: string; error?: string };
+  const payload = (await response.json()) as {
+    ready?: boolean;
+    live?: boolean;
+    phase?: string;
+    progress?: number;
+    error?: string;
+  };
   if (!response.ok) {
     throw new Error(payload.error ?? "Deploy status check failed.");
   }
-  return { live: payload.live === true, state: payload.state };
+  const live = payload.ready === true || payload.live === true;
+  return { live, phase: payload.phase, progress: payload.progress };
 }
 
 /** Default OpenRouter model for design edits (override on Worker via OPENROUTER_MODEL). */

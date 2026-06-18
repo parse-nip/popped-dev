@@ -1,5 +1,6 @@
 import type { Env } from "./types";
-import { isLockedFactPath } from "../../../shared/locked-fact-files";
+import { orderAgentContextPaths } from "../../../shared/agent-context-files";
+import { isEditableWorkspacePath } from "../../../shared/editable-workspace-paths";
 import type { AgentEditFixContext } from "../../../shared/design-fix-loop";
 import { DESIGN_ICON_URLS } from "../../../shared/design-web-images";
 import {
@@ -48,53 +49,50 @@ Return ONLY one valid JSON object (no markdown fences, no commentary).
 The JSON must match this shape:
 {
   "summary": "<one sentence>",
-  "writes": [{ "path": "src/app/design-overrides.css", "content": "<full file content>" }],
+  "writes": [{ "path": "src/components/community/MyWidget.tsx", "content": "<full file content>" }],
   "commands": [],
   "assets": []
 }
 
 Rules:
-- For simple color, size, spacing, or border tweaks: ONLY append CSS to src/app/design-overrides.css — keep the response small.
-- Visual AND functional changes are allowed: styling, layout, links, buttons, navigation, new components, interactivity, section order, social link rows, tooltips, etc.
-- Return FULL file contents for each write (not diffs). Prefer one file when possible.
-- NEVER modify locked fact files: src/locked/experience.json, src/locked/*, src/components/locked/LockedIntro.tsx.
-- NEVER write src/components/locked/LockedResume.tsx — style resume sections via src/app/design-overrides.css using [data-design-id="..."] selectors, or add community components under src/components/community/.
-- You MAY read src/locked/experience.json for facts (name, links, skills, projects) and display them in new community TSX — but never change the JSON.
-- Prefer src/app/design-overrides.css, src/components/community/*, src/app/globals.css, src/components/SiteHeader.tsx.
+- You may edit ANY file in the project except locked fact files (see below). Create new files freely under src/, public/, shared/, scripts/.
+- Multi-file changes are normal — add a component AND wire it in layout/page, update CSS AND TSX, refactor imports across files, etc.
+- Return FULL file contents for every file in writes[] (not diffs). Include every file you create or modify.
+- NEVER modify locked fact files: src/locked/experience.json, src/locked/manifest.json, src/components/locked/LockedIntro.tsx, or any path under src/locked/.
+- You MAY edit src/components/locked/LockedResume.tsx for layout/styling (never reword fact text).
+- You MAY read src/locked/experience.json for facts and surface them in new components — but never change the JSON.
+- For tiny color/spacing-only tweaks, src/app/design-overrides.css alone is fine.
 - Icons and images:
-  - Use img src with HTTPS CDN URLs directly (works without downloading): ${Object.entries(DESIGN_ICON_URLS).map(([k, v]) => `${k}=${v}`).join(", ")}
-  - Or list assets[] to fetch into public/assets/ (allowlisted hosts: cdn.simpleicons.org, raw.githubusercontent.com, github.githubassets.com, avatars.githubusercontent.com)
-  - Or inline SVG / Unicode emoji in TSX. Do not use npm icon libraries unless the user explicitly asks.
-- commands: only npm install lines if new packages are needed; otherwise [].
-- Keep changes minimal and focused on the user request.`;
+  - HTTPS CDN URLs in img src: ${Object.entries(DESIGN_ICON_URLS).map(([k, v]) => `${k}=${v}`).join(", ")}
+  - Or assets[] to fetch into public/assets/ (allowlisted: cdn.simpleicons.org, raw.githubusercontent.com, github.githubassets.com, avatars.githubusercontent.com)
+  - Or inline SVG / emoji in TSX.
+- commands: npm install lines when new packages are needed; otherwise [].
+- Match existing code style and imports. Update all files that need to change for the request to work.`;
 
 const FIX_SYSTEM_PROMPT = `You fix compile/build errors in popped.dev — a Next.js community portfolio.
-A previous AI edit broke the preview. Return ONLY one valid JSON object (no markdown fences):
+Return ONLY one valid JSON object (no markdown fences):
 {
   "summary": "<one sentence>",
-  "writes": [{ "path": "src/app/design-overrides.css", "content": "<full corrected file content>" }],
+  "writes": [{ "path": "src/app/page.tsx", "content": "<full corrected file content>" }],
   "commands": [],
   "assets": []
 }
 
 Rules:
-- Fix the reported error with the smallest correct change.
-- Return FULL file contents for each write (not diffs).
+- Fix the reported error with the smallest correct change across however many files are needed.
+- Return FULL file contents for each write (not diffs). You may create or modify any editable path.
 - NEVER modify locked fact files: src/locked/experience.json, src/locked/*, src/components/locked/LockedIntro.tsx.
-- NEVER write src/components/locked/LockedResume.tsx.
-- Prefer fixing the files that caused the error; use src/app/design-overrides.css, src/components/community/*, src/app/globals.css, src/components/SiteHeader.tsx.
-- If imports or syntax are wrong, fix them. If a package is missing, add npm install in commands.
+- If imports, types, or syntax are wrong, fix them in the right files. Add npm install in commands if a package is missing.
 - Do not introduce unrelated changes.`;
 
 function buildEditPrompt(input: AgentEditInput): string {
-  const fileList = Object.keys(input.files)
-    .slice(0, 20)
-    .map((path) => `- ${path}`)
-    .join("\n");
+  const sourceFile = input.selectedElement?.sourceFile;
+  const orderedPaths = orderAgentContextPaths(input.files, sourceFile);
 
-  const fileContents = Object.entries(input.files)
-    .slice(0, 4)
-    .map(([path, content]) => `### ${path}\n\`\`\`\n${content.slice(0, 1200)}\n\`\`\``)
+  const fileList = orderedPaths.map((path) => `- ${path}`).join("\n");
+
+  const fileContents = orderedPaths
+    .map((path) => `### ${path}\n\`\`\`\n${input.files[path]}\n\`\`\``)
     .join("\n\n");
 
   const element = input.selectedElement
@@ -123,14 +121,13 @@ function buildFixPrompt(input: AgentEditInput): string {
   const fix = input.fixContext;
   if (!fix) return buildEditPrompt(input);
 
-  const fileList = Object.keys(input.files)
-    .slice(0, 24)
-    .map((path) => `- ${path}`)
-    .join("\n");
+  const sourceFile = input.selectedElement?.sourceFile;
+  const orderedPaths = orderAgentContextPaths(input.files, sourceFile);
 
-  const fileContents = Object.entries(input.files)
-    .slice(0, 6)
-    .map(([path, content]) => `### ${path}\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\``)
+  const fileList = orderedPaths.map((path) => `- ${path}`).join("\n");
+
+  const fileContents = orderedPaths
+    .map((path) => `### ${path}\n\`\`\`\n${input.files[path]}\n\`\`\``)
     .join("\n\n");
 
   const element = input.selectedElement
@@ -188,15 +185,7 @@ function fallbackEdit(input: AgentEditInput): AgentEditResult {
 }
 
 function isSafeAgentWritePath(path: string): boolean {
-  if (isLockedFactPath(path)) return false;
-  if (path.startsWith("src/components/locked/")) return false;
-  if (path.startsWith("src/locked/")) return false;
-  if (path === "src/app/design-overrides.css") return true;
-  if (path === "src/app/globals.css") return true;
-  if (path.startsWith("src/components/community/")) return true;
-  if (path === "src/components/SiteHeader.tsx") return true;
-  if (path.startsWith("public/assets/")) return true;
-  return false;
+  return isEditableWorkspacePath(path);
 }
 
 async function finalizeAgentEditResult(
@@ -230,7 +219,7 @@ function sanitizeAgentEditResult(
   const safeCommands = result.commands.filter((cmd) => cmd.trim().startsWith("npm install"));
 
   if (strict && result.writes.length > 0 && safeWrites.length === 0) {
-    throw new Error("The AI tried to edit locked files — try styling with CSS instead.");
+    throw new Error("The AI tried to edit locked files — pick a different approach that avoids locked fact paths.");
   }
 
   if (safeWrites.length > 0) {
@@ -256,9 +245,10 @@ function openRouterErrorMessage(result: OpenRouterChatResult): string {
 async function callDesignLlm(
   env: Env,
   messages: ChatMessage[],
+  maxTokens = 16_384,
 ): Promise<OpenRouterChatResult> {
   return openRouterChat(env, messages, {
-    maxTokens: 2048,
+    maxTokens,
     temperature: 0.15,
   });
 }
@@ -284,7 +274,11 @@ async function runLlmEditPass(
   let lastRawText: string | null = null;
 
   for (let attempt = 0; attempt <= MAX_PARSE_RETRIES; attempt += 1) {
-    const aiResult = await callDesignLlm(env, messages);
+    const aiResult = await callDesignLlm(
+      env,
+      messages,
+      options.strict ? 8_192 : 16_384,
+    );
 
     if (hasOpenRouter && !aiResult.text) {
       throw new Error(openRouterErrorMessage(aiResult));

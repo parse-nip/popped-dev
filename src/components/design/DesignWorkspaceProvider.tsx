@@ -50,7 +50,7 @@ type DesignWorkspaceContextValue = {
   editEvents: EditEvent[];
   baseSha: string | null;
   commitUrl: string | null;
-  publishStatus: "idle" | "publishing" | "published" | "deploying" | "failed";
+  publishStatus: PublishStatus;
   publishError: string | null;
   /** Rough progress for the current boot/install/dev phase (0–100). */
   progressPercent: number | null;
@@ -64,6 +64,12 @@ type DesignWorkspaceContextValue = {
 };
 
 const DesignWorkspaceContext = createContext<DesignWorkspaceContextValue | null>(null);
+
+const DEPLOY_POLL_MS = 4000;
+const DEPLOY_SUCCESS_MS = 2000;
+const DEPLOY_MAX_ATTEMPTS = 45;
+
+export type PublishStatus = "idle" | "publishing" | "published" | "deploying" | "deployed" | "failed";
 
 function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
@@ -104,9 +110,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
   const [editEvents, setEditEvents] = useState<EditEvent[]>([]);
   const [baseSha, setBaseSha] = useState<string | null>(null);
   const [commitUrl, setCommitUrl] = useState<string | null>(null);
-  const [publishStatus, setPublishStatus] = useState<
-    "idle" | "publishing" | "published" | "deploying" | "failed"
-  >("idle");
+  const [publishStatus, setPublishStatus] = useState<PublishStatus>("idle");
   const [publishError, setPublishError] = useState<string | null>(null);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [statusDetail, setStatusDetail] = useState<string | null>(null);
@@ -119,6 +123,66 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
   const bootPromiseRef = useRef<Promise<void> | null>(null);
   const devLogRef = useRef("");
   const approvedFlashTimeoutRef = useRef<number | null>(null);
+  const deployPollRef = useRef<number | null>(null);
+
+  const pollDeployUntilLive = useCallback((sha: string) => {
+    if (deployPollRef.current) {
+      window.clearInterval(deployPollRef.current);
+      deployPollRef.current = null;
+    }
+
+    let attempts = 0;
+
+    const finishDeploy = () => {
+      if (deployPollRef.current) {
+        window.clearInterval(deployPollRef.current);
+        deployPollRef.current = null;
+      }
+      setPublishStatus("deployed");
+      setStatusBarTone("approved");
+      window.setTimeout(() => {
+        window.location.reload();
+      }, DEPLOY_SUCCESS_MS);
+    };
+
+    const poll = () => {
+      attempts += 1;
+      void pollDeployStatus(sha)
+        .then((deploy) => {
+          if (deploy.live) {
+            finishDeploy();
+            return;
+          }
+          if (attempts >= DEPLOY_MAX_ATTEMPTS) {
+            if (deployPollRef.current) {
+              window.clearInterval(deployPollRef.current);
+              deployPollRef.current = null;
+            }
+            setPublishStatus("published");
+          }
+        })
+        .catch(() => {
+          if (attempts >= DEPLOY_MAX_ATTEMPTS) {
+            if (deployPollRef.current) {
+              window.clearInterval(deployPollRef.current);
+              deployPollRef.current = null;
+            }
+            setPublishStatus("published");
+          }
+        });
+    };
+
+    poll();
+    deployPollRef.current = window.setInterval(poll, DEPLOY_POLL_MS);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (deployPollRef.current) {
+        window.clearInterval(deployPollRef.current);
+      }
+    };
+  }, []);
 
   const appendLog = useCallback((chunk: string) => {
     devLogRef.current += stripAnsi(chunk);
@@ -473,18 +537,10 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       setCommitUrl(result.prUrl ?? result.commitUrl);
       setPublishStatus("deploying");
       setStatus("published");
+      setStatusBarTone("default");
       setError(null);
 
-      void (async () => {
-        for (let i = 0; i < 30; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 4000));
-          const deploy = await pollDeployStatus(result.sha);
-          if (deploy.live) {
-            setPublishStatus("published");
-            return;
-          }
-        }
-      })();
+      pollDeployUntilLive(result.sha);
     }
 
     try {
@@ -524,7 +580,7 @@ export function DesignWorkspaceProvider({ children }: { children: ReactNode }) {
       setError(message);
       throw publishErr;
     }
-  }, [baseSha, editEvents]);
+  }, [baseSha, editEvents, pollDeployUntilLive]);
 
   const embedPreviewUrl = previewUrl
     ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}designEmbed=1&rev=${previewRevision}`

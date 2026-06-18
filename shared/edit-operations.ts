@@ -43,18 +43,12 @@ export type DesignPatch = {
   };
 };
 
+import { isEditableWorkspacePath } from "./editable-workspace-paths";
+
 export const DESIGN_OVERRIDES_PATH = "src/app/design-overrides.css";
 
-export const ALLOWED_REPO_PATHS = new Set([
-  DESIGN_OVERRIDES_PATH,
-  "src/components/SiteHeader.tsx",
-  "src/components/locked/LockedResume.tsx",
-]);
-
 export function isAllowedRepoPath(path: string): boolean {
-  if (ALLOWED_REPO_PATHS.has(path)) return true;
-  if (path.startsWith("public/assets/") && path.endsWith(".svg")) return true;
-  return false;
+  return isEditableWorkspacePath(path);
 }
 
 export function designIdSelector(designId: string): string {
