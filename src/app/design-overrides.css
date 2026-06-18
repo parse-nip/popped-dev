@@ -1,16 +1,2 @@
-#locked-resume [data-design-id="exp-agentfirst"], body [data-design-id="exp-agentfirst"] {
-  font-weight: 600;
-  color: #4a4a4a;
-}
-
-#locked-resume [data-design-id="exp-agentfirst"]::before {
-  content: 'AI \u2022 ';
-  color: #667eea;
-  margin-right: 0.5rem;
-}
-
-#locked-resume [data-design-id="exp-edtech"]::before {
-  content: 'AI \u2022 ';
-  color: #667eea;
-  margin-right: 0.5rem;
-}
+#locked-resume [data-design-id="hero.links"] a::before { display: inline-flex; align-items: center; margin-right: 0.5rem; }
+#locked-resume [data-design-id="hero.links"] a[href*="github"]::before { content: ""; background-image: url("https://cdn.simpleicons.org/github/111111"); width: 1.2rem; height: 1.2rem; background-size: contain; background-repeat: no-repeat; }
