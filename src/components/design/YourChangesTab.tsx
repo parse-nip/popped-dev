@@ -1,23 +1,36 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { useDesignChanges } from "@/components/design/DesignChangesProvider";
 import { useDesignMode } from "@/components/design/DesignModeContext";
-import {
-  deployStatusLabel,
-  formatChangeAge,
-  type DesignChange,
-} from "@/lib/design-changes-store";
-
-function statusClassName(status: DesignChange["deployStatus"]): string {
-  return `your-changes-status your-changes-status--${status}`;
-}
+import { fetchDesignBaseSha, publishDesignPatches } from "@/lib/agent-client";
 
 export function YourChangesTab() {
-  const { changes, pendingCount, focusChange } = useDesignChanges();
+  const {
+    state,
+    pendingCount,
+    acceptedCount,
+    removeAcceptedPatch,
+    setPublishStatus,
+    finishPublish,
+  } = useDesignChanges();
   const { setMode: setDesignMode, isDesignMode } = useDesignMode();
   const [open, setOpen] = useState(false);
+  const [baseSha, setBaseSha] = useState<string | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  const hasChanges =
+    state.pendingPatch !== null ||
+    state.acceptedPatches.length > 0 ||
+    state.publishStatus === "published";
+
+  useEffect(() => {
+    if (!open) return;
+    void fetchDesignBaseSha()
+      .then(setBaseSha)
+      .catch(() => setBaseSha(null));
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -42,14 +55,25 @@ export function YourChangesTab() {
     };
   }, [open]);
 
-  if (changes.length === 0) return null;
+  if (!hasChanges) return null;
 
-  function handleChangeClick(change: DesignChange) {
-    focusChange(change.runId);
-    if (!isDesignMode) {
-      setDesignMode("design");
+  async function handlePublish() {
+    if (state.acceptedPatches.length === 0) return;
+
+    setPublishStatus("publishing");
+
+    try {
+      const sha = baseSha ?? (await fetchDesignBaseSha());
+      const result = await publishDesignPatches({
+        acceptedPatches: state.acceptedPatches,
+        baseSha: sha,
+      });
+      finishPublish(result.commitUrl);
+      setOpen(true);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Publish failed.";
+      setPublishStatus("failed", null, message);
     }
-    setOpen(false);
   }
 
   return (
@@ -66,9 +90,12 @@ export function YourChangesTab() {
         onClick={() => setOpen((value) => !value)}
       >
         <span className="your-changes-tab-label">Your changes</span>
-        {pendingCount > 0 ? (
-          <span className="your-changes-tab-badge" aria-label={`${pendingCount} in progress`}>
-            {pendingCount}
+        {pendingCount + acceptedCount > 0 ? (
+          <span
+            className="your-changes-tab-badge"
+            aria-label={`${pendingCount + acceptedCount} patches`}
+          >
+            {pendingCount + acceptedCount}
           </span>
         ) : null}
       </button>
@@ -77,36 +104,78 @@ export function YourChangesTab() {
         <div className="your-changes-panel-header">
           <p className="your-changes-panel-title">Your changes</p>
           <p className="your-changes-panel-subtitle">
-            Tap a prompt to resume its chat and confirm on the page.
+            Accepted patches preview locally. Publish sends them to GitHub once.
           </p>
         </div>
 
+        {state.pendingPatch ? (
+          <p className="your-changes-pending-hint">
+            Pending: {state.pendingPatch.summary} — confirm on the page.
+          </p>
+        ) : null}
+
         <ul className="your-changes-list">
-          {changes.map((change) => (
-            <li key={change.runId}>
-              <button
-                type="button"
-                className="your-changes-item your-changes-item--clickable"
-                onClick={() => handleChangeClick(change)}
-              >
+          {state.acceptedPatches.map((patch) => (
+            <li key={patch.id}>
+              <div className="your-changes-item">
                 <div className="your-changes-item-main">
-                  <p className="your-changes-prompt">&ldquo;{change.prompt}&rdquo;</p>
-                  <p className="your-changes-meta">
-                    {change.elementLabel} · {formatChangeAge(change.createdAt)}
-                  </p>
+                  <p className="your-changes-prompt">{patch.summary}</p>
+                  <p className="your-changes-meta">{patch.target.designId}</p>
                 </div>
-                <div className="your-changes-item-actions">
-                  <span className={statusClassName(change.deployStatus)}>
-                    {deployStatusLabel(change.deployStatus)}
-                  </span>
-                  <span className="your-changes-view-btn">
-                    {change.deployStatus === "ready" ? "Confirm" : "Open"}
-                  </span>
-                </div>
-              </button>
+                <button
+                  type="button"
+                  className="your-changes-remove-btn"
+                  onClick={() => removeAcceptedPatch(patch.id)}
+                  aria-label={`Remove ${patch.summary}`}
+                >
+                  Remove
+                </button>
+              </div>
             </li>
           ))}
         </ul>
+
+        {state.publishError ? (
+          <p className="your-changes-publish-error">{state.publishError}</p>
+        ) : null}
+
+        {state.publishStatus === "published" && state.publishUrl ? (
+          <p className="your-changes-publish-success">
+            Published —{" "}
+            <a href={state.publishUrl} target="_blank" rel="noreferrer">
+              view on GitHub
+            </a>
+            . Cloudflare will deploy shortly.
+          </p>
+        ) : null}
+
+        <div className="your-changes-panel-footer">
+          <Button
+            type="button"
+            size="sm"
+            disabled={
+              state.acceptedPatches.length === 0 ||
+              state.publishStatus === "publishing" ||
+              state.publishStatus === "published"
+            }
+            onClick={() => {
+              void handlePublish();
+            }}
+          >
+            {state.publishStatus === "publishing"
+              ? "Publishing…"
+              : `Publish ${state.acceptedPatches.length} patch${state.acceptedPatches.length === 1 ? "" : "es"}`}
+          </Button>
+          {!isDesignMode ? (
+            <button
+              type="button"
+              className="your-changes-enter-design"
+              onClick={() => setDesignMode("design")}
+            >
+              Enter design mode
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   );

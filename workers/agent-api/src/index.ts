@@ -34,6 +34,9 @@ import {
 } from "./pages-preview";
 import { branchForSession } from "./preview-url";
 import { resolveBranchDraft } from "./draft";
+import { classifyRequiresCodeChange, generateDesignPatch } from "./design-run";
+import { getMainHeadSha, publishWithAttribution } from "./design-publish";
+import { validatePatch, type DesignPatch } from "./design-patch";
 import {
   checkMergeCooldown,
   checkRateLimit,
@@ -87,6 +90,55 @@ function requireContributorName(name: unknown): string | null {
   if (typeof name !== "string") return null;
   const trimmed = name.trim();
   return trimmed.length >= 2 && trimmed.length <= 80 ? trimmed : null;
+}
+
+function parseSelectedElement(value: unknown): {
+  designId: string;
+  tagName: string;
+  text: string;
+  selector: string;
+  computedStyle: Record<string, string>;
+} | null {
+  if (!value || typeof value !== "object") return null;
+  const el = value as Record<string, unknown>;
+  if (
+    typeof el.designId !== "string" ||
+    typeof el.tagName !== "string" ||
+    typeof el.text !== "string" ||
+    typeof el.selector !== "string" ||
+    !el.computedStyle ||
+    typeof el.computedStyle !== "object"
+  ) {
+    return null;
+  }
+  const computedStyle: Record<string, string> = {};
+  for (const [key, val] of Object.entries(el.computedStyle as Record<string, unknown>)) {
+    if (typeof val === "string") computedStyle[key] = val;
+  }
+  return {
+    designId: el.designId,
+    tagName: el.tagName,
+    text: el.text.slice(0, 120),
+    selector: el.selector,
+    computedStyle,
+  };
+}
+
+function parseAcceptedPatches(value: unknown): DesignPatch[] {
+  if (!Array.isArray(value)) return [];
+  const patches: DesignPatch[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const patch = item as DesignPatch;
+    if (patch.kind !== "css") continue;
+    try {
+      validatePatch(patch);
+      patches.push(patch);
+    } catch {
+      // skip invalid
+    }
+  }
+  return patches;
 }
 
 function parseElementContext(value: unknown): ElementContextPayload | null {
@@ -316,9 +368,6 @@ async function syncRunPreview(
   }
 
   const terminal = isTerminalRunStatus(run.status);
-  if (terminal && run.status === "FINISHED" && branch) {
-    await maybeEmitPreview(env, branch, emit, flags, record.baselineSha ?? null);
-  }
 
   await updateRun(env.SESSIONS, runId, {
     branch,
@@ -383,12 +432,7 @@ function createPollRunStream(
           }
 
           if (isTerminalRunStatus(status)) {
-            if (status === "FINISHED") {
-              const branch = record.branch;
-              if (branch) {
-                await waitForPreviewDeploy(env, branch, emit, flags, record.baselineSha ?? null);
-              }
-            } else if (status === "ERROR") {
+            if (status === "ERROR") {
               emit("error", { message: "Agent run failed." });
             }
             emit("done", {});
@@ -496,10 +540,6 @@ function handleUpstreamSseEvent(
       status,
       prUrl: extractPrUrl(git) ?? undefined,
     });
-
-    if (isTerminalRunStatus(status) && status === "FINISHED" && branch) {
-      void maybeEmitPreview(env, branch, emit, flags, record.baselineSha ?? null);
-    }
     return;
   }
 
@@ -515,6 +555,169 @@ function handleUpstreamSseEvent(
     emit("done", {});
   }
 }
+
+app.post("/api/design/run", async (c) => {
+  const body = (await c.req.json()) as {
+    sessionId?: string;
+    prompt?: string;
+    selectedElement?: unknown;
+    acceptedPatches?: unknown;
+    contributorName?: string;
+  };
+
+  const contributorName = requireContributorName(body.contributorName);
+  if (!contributorName) {
+    return jsonError("contributor_name_required");
+  }
+
+  const prompt = typeof body.prompt === "string" ? body.prompt.trim() : "";
+  if (!prompt) {
+    return jsonError("invalid_prompt");
+  }
+
+  const selectedElement = parseSelectedElement(body.selectedElement);
+  if (!selectedElement) {
+    return jsonError("invalid_selected_element");
+  }
+
+  const sessionId =
+    typeof body.sessionId === "string" && body.sessionId.length > 0
+      ? body.sessionId
+      : crypto.randomUUID();
+
+  const cooldown = await checkMergeCooldown(c.env.SESSIONS, clientIp(c.req.raw));
+  if (!cooldown.allowed) {
+    return mergeCooldownResponse(cooldown.retryAfterSeconds);
+  }
+
+  const rate = await checkRateLimit(c.env.SESSIONS, `${clientIp(c.req.raw)}:${sessionId}`);
+  if (!rate.allowed) {
+    return jsonError("rate_limit_exceeded", 429, {
+      retryAfterSeconds: rate.retryAfterSeconds,
+    });
+  }
+
+  const acceptedPatches = parseAcceptedPatches(body.acceptedPatches);
+
+  if (classifyRequiresCodeChange(prompt)) {
+    return jsonError("requires_code_publish", 422, {
+      code: "requires_code_publish",
+      message:
+        "This change requires a code publish. CSS-only live preview is not available for structural or fact edits.",
+    });
+  }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (event: string, data: Record<string, unknown>) => {
+        controller.enqueue(encoder.encode(`event: ${event}\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      };
+
+      try {
+        emit("status", { message: "Thinking…" });
+        emit("step", { id: "think", label: "Generating CSS patch", state: "running" });
+
+        const patch = await generateDesignPatch(c.env, {
+          prompt,
+          selectedElement,
+          acceptedPatches,
+          contributorName,
+        });
+
+        emit("draft_patch", patch);
+        emit("assistant", { text: patch.summary });
+        emit("step", { id: "patch", label: "Patch ready — confirm on page", state: "done" });
+        emit("done", { ok: true });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "design_run_failed";
+        emit("error", { message });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return sseResponse(stream);
+});
+
+app.post("/api/design/publish", async (c) => {
+  if (!c.env.GITHUB_TOKEN) {
+    return jsonError("github_token_required", 503);
+  }
+
+  const body = (await c.req.json()) as {
+    sessionId?: string;
+    baseSha?: string;
+    acceptedPatches?: unknown;
+    contributorName?: string;
+  };
+
+  const contributorName = requireContributorName(body.contributorName);
+  if (!contributorName) {
+    return jsonError("contributor_name_required");
+  }
+
+  const baseSha = typeof body.baseSha === "string" ? body.baseSha.trim() : "";
+  if (!baseSha) {
+    return jsonError("base_sha_required");
+  }
+
+  const sessionId =
+    typeof body.sessionId === "string" && body.sessionId.length > 0
+      ? body.sessionId
+      : crypto.randomUUID();
+
+  const acceptedPatches = parseAcceptedPatches(body.acceptedPatches);
+  if (acceptedPatches.length === 0) {
+    return jsonError("no_patches");
+  }
+
+  const cooldown = await checkMergeCooldown(c.env.SESSIONS, clientIp(c.req.raw));
+  if (!cooldown.allowed) {
+    return mergeCooldownResponse(cooldown.retryAfterSeconds);
+  }
+
+  try {
+    const { commitUrl } = await publishWithAttribution(c.env, {
+      acceptedPatches,
+      contributorName,
+      baseSha,
+      sessionId,
+    });
+
+    await setMergeCooldown(
+      c.env.SESSIONS,
+      clientIp(c.req.raw),
+      mergeCooldownMs(c.env),
+    );
+
+    return c.json({
+      ok: true,
+      commitUrl,
+      patchCount: acceptedPatches.length,
+      cooldownSeconds: Math.ceil(mergeCooldownMs(c.env) / 1000),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "publish_failed";
+    return jsonError(message, 502);
+  }
+});
+
+app.get("/api/design/status", async (c) => {
+  if (!c.env.GITHUB_TOKEN) {
+    return jsonError("github_token_required", 503);
+  }
+
+  try {
+    const sha = await getMainHeadSha(c.env);
+    return c.json({ ok: true, baseSha: sha });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "status_failed";
+    return jsonError(message, 502);
+  }
+});
 
 app.post("/api/agent/session", async (c) => {
   if (!c.env.CURSOR_API_KEY) {
@@ -1018,11 +1221,8 @@ app.get("/api/agent/runs/:runId/stream", async (c) => {
             flags,
           );
           if (isTerminalRunStatus(status)) {
-            if (status === "FINISHED") {
-              const branch = record.branch;
-              if (branch && !flags.previewReady) {
-                await waitForPreviewDeploy(c.env, branch, emit, flags, record.baselineSha ?? null);
-              }
+            if (status === "ERROR") {
+              emit("error", { message: "Agent run failed." });
             }
             emit("done", {});
           }

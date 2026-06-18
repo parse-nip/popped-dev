@@ -4,7 +4,6 @@ import Link from "next/link";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
 import { useDesignChanges } from "@/components/design/DesignChangesProvider";
 import { useDesignMode } from "@/components/design/DesignModeContext";
-import { usePreview } from "@/components/design/PreviewContext";
 import { formatCooldownRemaining } from "@/lib/merge-cooldown";
 import { useMergeCooldown } from "@/lib/use-merge-cooldown";
 import { isDraftPreviewEmbed } from "@/lib/draft-preview";
@@ -29,11 +28,9 @@ function DesignCursorIcon() {
 
 export function SiteHeader() {
   const { isDesignMode, toggleDesignMode } = useDesignMode();
-  const { mode: previewMode } = usePreview();
   const { isAgentBusy } = useDesignChanges();
   const { active: mergeCooldownActive, remainingMs } = useMergeCooldown();
-  const designDisabled =
-    previewMode === "preview" || isDraftPreviewEmbed() || mergeCooldownActive;
+  const designDisabled = isDraftPreviewEmbed() || mergeCooldownActive;
   const designLockedOn = isAgentBusy && isDesignMode;
 
   return (
@@ -49,8 +46,8 @@ export function SiteHeader() {
             className="site-header-design-locked"
             title={
               mergeCooldownActive
-                ? "Wait before starting a new cloud agent after merging"
-                : "Design changes are disabled while reviewing your draft"
+                ? "Wait before publishing again after your last merge"
+                : "Design changes are disabled in preview embed"
             }
           >
             {mergeCooldownActive

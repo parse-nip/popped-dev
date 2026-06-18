@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./design-overrides.css";
 
 export const metadata: Metadata = {
   title: "parse-nip · popped.dev",

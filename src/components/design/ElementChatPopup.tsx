@@ -7,15 +7,14 @@ import {
   type ActivityStep,
 } from "@/components/design/AgentActivityFeed";
 import { ContributorNameControl } from "@/components/community/ContributorNameControl";
-import { useDesignChanges } from "@/components/design/DesignChangesProvider";
-import { useLiveDraft } from "@/components/design/LiveDraftProvider";
 import {
-  sendAgentMessage,
-  streamAgentRun,
-  type AgentStreamEvent,
-} from "@/lib/agent-client";
+  useDesignChanges,
+  useSetAgentBusy,
+} from "@/components/design/DesignChangesProvider";
+import { streamDesignRun, type DesignStreamEvent } from "@/lib/agent-client";
 import { readContributorName, subscribeContributorName } from "@/lib/contributor-name";
 import type { ElementContext } from "@/lib/element-context";
+import { validatePatch } from "@/lib/design-patch";
 
 type Message = {
   id: string;
@@ -38,13 +37,6 @@ const VIEWPORT_PADDING = 12;
 const ANCHOR_OVERLAP = 14;
 
 type PopupPhase = "input" | "running" | "complete";
-
-type RunMeta = {
-  runId: string;
-  agentId: string;
-  branch: string;
-  baselineSha: string | null;
-};
 
 type PopupLayout = { left: number; top: number; width: number };
 
@@ -73,10 +65,7 @@ function computePopupLayout(
   }
 
   const width = computePopupWidth(anchorRect);
-  const height = Math.min(
-    popupHeight,
-    window.innerHeight - VIEWPORT_PADDING * 2,
-  );
+  const height = Math.min(popupHeight, window.innerHeight - VIEWPORT_PADDING * 2);
 
   let left = anchorRect.left;
   const maxLeft = window.innerWidth - width - VIEWPORT_PADDING;
@@ -178,10 +167,7 @@ export function ElementChatPopup({
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const shouldListenRef = useRef(false);
   const dictationBaseRef = useRef("");
-  const streamCleanupRef = useRef<(() => void) | null>(null);
-  const assistantBufferRef = useRef("");
-  const runMetaRef = useRef<RunMeta | null>(null);
-  const runFinishedRef = useRef(false);
+  const runAbortRef = useRef<AbortController | null>(null);
   const [activitySteps, setActivitySteps] = useState<ActivityStep[]>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -197,9 +183,9 @@ export function ElementChatPopup({
   const [dictationError, setDictationError] = useState<string | null>(null);
   const [layout, setLayout] = useState<PopupLayout>(() => getPopupLayout(anchorRect));
   const [contributorName, setContributorName] = useState(readContributorName);
-  const { addChange, updateDeployStatus, claimStream, releaseStream, focusChange } =
-    useDesignChanges();
-  const { startLiveDraft, showConfirm } = useLiveDraft();
+  const { state, setSelectedDesignId, setPendingPatch } = useDesignChanges();
+  const setAgentBusy = useSetAgentBusy();
+  const showConfirm = Boolean(state.pendingPatch);
   const hasThread =
     phase === "running" ||
     (phase === "complete" && (messages.length > 0 || activitySteps.length > 0));
@@ -209,6 +195,10 @@ export function ElementChatPopup({
   const isLocked = phase === "running" || (phase === "complete" && showConfirm);
 
   useEffect(() => subscribeContributorName(setContributorName), []);
+
+  useEffect(() => {
+    setSelectedDesignId(elementContext.designId);
+  }, [elementContext.designId, setSelectedDesignId]);
 
   useEffect(() => {
     onSelectionLockChange?.(isLocked);
@@ -268,96 +258,67 @@ export function ElementChatPopup({
 
   useEffect(() => {
     if (!showConfirm) return;
-    const runId = runMetaRef.current?.runId;
-    if (runId) {
-      updateDeployStatus(runId, "ready");
-      pushActivityStep({ id: "draft", label: "Styles applied — confirm below", state: "done" });
-    }
-  }, [showConfirm, updateDeployStatus, pushActivityStep]);
+    pushActivityStep({ id: "draft", label: "Styles applied — confirm below", state: "done" });
+  }, [showConfirm, pushActivityStep]);
 
   const finishRun = useCallback(() => {
     setIsThinking(false);
+    setAgentBusy(false);
     setPhase("complete");
-    pushActivityStep({ id: "done", label: "Agent finished", state: "done" });
-  }, [pushActivityStep]);
+    pushActivityStep({ id: "done", label: "Patch ready", state: "done" });
+  }, [pushActivityStep, setAgentBusy]);
 
   const handleStreamEvent = useCallback(
-    (event: AgentStreamEvent) => {
-      const runId = runMetaRef.current?.runId;
-
+    (event: DesignStreamEvent) => {
       if (event.type === "assistant") {
-        assistantBufferRef.current += event.text;
-        updateAssistantMessage(assistantBufferRef.current);
-        pushActivityStep({ id: "connect", label: "Connected to agent", state: "done" });
-        if (runId) updateDeployStatus(runId, "working");
+        updateAssistantMessage(event.text);
+        pushActivityStep({ id: "connect", label: "Patch generated", state: "done" });
         return;
       }
 
       if (event.type === "step") {
         pushActivityStep(event);
-        if (runId && (event.id === "start" || event.id === "work" || event.id === "think")) {
-          updateDeployStatus(runId, "working");
-        }
-        return;
-      }
-
-      if (event.type === "activity") {
-        if (event.kind === "thinking") {
-          appendActivityMessage(event.text, event.streamId ?? "thinking");
-        } else if (event.kind === "tool") {
-          appendActivityMessage(event.text, event.streamId, true);
-        } else {
-          appendActivityMessage(event.text, event.streamId, true);
-        }
         return;
       }
 
       if (event.type === "status") {
-        appendActivityMessage(event.message, `status-${event.message.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24)}`, true);
-        pushActivityStep({
-          id: `status-${event.message.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 24)}`,
-          label: event.message.replace(/…$/, ""),
-          state: "running",
-        });
+        appendActivityMessage(event.message, `status-${event.message.slice(0, 24)}`, true);
         return;
       }
 
-      if (event.type === "preview") {
+      if (event.type === "draft_patch") {
+        try {
+          validatePatch(event.patch);
+          setPendingPatch(event.patch);
+          updateAssistantMessage(event.patch.summary);
+          pushActivityStep({ id: "apply", label: "Applied to page", state: "done" });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Invalid patch returned.";
+          setActivityError(message);
+        }
         return;
       }
 
       if (event.type === "error") {
-        if (/no longer available|stream_expired|connection to agent stream lost/i.test(event.message)) {
-          pushActivityStep({ id: "reconnect", label: "Checking final result", state: "running" });
-          return;
-        }
-        if (/agent_busy|still working/i.test(event.message)) {
-          pushActivityStep({ id: "busy", label: "Agent finishing previous step", state: "running" });
-          return;
-        }
-        if (runId) updateDeployStatus(runId, "failed");
-        if (runId) releaseStream(runId);
         setActivityError(event.message);
         pushActivityStep({ id: "error", label: "Something went wrong", state: "done" });
         setPhase("complete");
         setIsThinking(false);
+        setAgentBusy(false);
         return;
       }
 
       if (event.type === "done") {
-        runFinishedRef.current = true;
-        if (runId) releaseStream(runId);
         finishRun();
       }
     },
     [
       appendActivityMessage,
       finishRun,
-      focusChange,
       pushActivityStep,
-      releaseStream,
+      setAgentBusy,
+      setPendingPatch,
       updateAssistantMessage,
-      updateDeployStatus,
     ],
   );
 
@@ -474,8 +435,8 @@ export function ElementChatPopup({
       shouldListenRef.current = false;
       recognitionRef.current?.abort();
       recognitionRef.current = null;
-      streamCleanupRef.current?.();
-      streamCleanupRef.current = null;
+      runAbortRef.current?.abort();
+      runAbortRef.current = null;
     };
   }, []);
 
@@ -484,11 +445,8 @@ export function ElementChatPopup({
     if (!trimmed || isThinking) return;
 
     stopDictation();
-    streamCleanupRef.current?.();
     setActivitySteps([]);
     setActivityError(null);
-    assistantBufferRef.current = "";
-    runFinishedRef.current = false;
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -501,44 +459,26 @@ export function ElementChatPopup({
     setInput("");
     setPhase("running");
     setIsThinking(true);
-    pushActivityStep({ id: "send", label: "Sending to agent", state: "running" });
+    setAgentBusy(true);
+    pushActivityStep({ id: "send", label: "Sending prompt", state: "running" });
 
     try {
-      const { runId, agentId, branch, baselineSha, attachedToActiveRun } = await sendAgentMessage({
-        message: trimmed,
-        elementContext,
-      });
-
-      pushActivityStep({ id: "send", label: "Sent to agent", state: "done" });
-      if (attachedToActiveRun) {
-        pushActivityStep({ id: "reconnect", label: "Reconnecting to in-progress run", state: "running" });
-      } else {
-        pushActivityStep({ id: "start", label: "Starting agent", state: "running" });
-      }
-
-      runMetaRef.current = { runId, agentId, branch, baselineSha: baselineSha ?? null };
-      runFinishedRef.current = false;
-      claimStream(runId);
-      focusChange(runId);
-
-      addChange({
-        runId,
-        agentId,
-        branch,
-        prompt: trimmed,
-        elementLabel,
-        baselineSha: baselineSha ?? null,
-      });
-
-      startLiveDraft({ runId, agentId, branch });
-
-      streamCleanupRef.current = streamAgentRun(runId, agentId, handleStreamEvent);
+      await streamDesignRun(
+        {
+          prompt: trimmed,
+          elementContext,
+          acceptedPatches: state.acceptedPatches,
+        },
+        handleStreamEvent,
+      );
+      pushActivityStep({ id: "send", label: "Sent", state: "done" });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Agent request failed.";
+      const message = error instanceof Error ? error.message : "Design request failed.";
       setActivityError(message);
       pushActivityStep({ id: "error", label: "Request failed", state: "done" });
       setPhase("complete");
       setIsThinking(false);
+      setAgentBusy(false);
     }
   }
 
@@ -655,7 +595,7 @@ export function ElementChatPopup({
           </span>
         )}
 
-        <span className="element-chat-popup-model">Composer 2.5 Fast</span>
+        <span className="element-chat-popup-model">CSS patch mode</span>
 
         {phase === "input" ? (
           <button

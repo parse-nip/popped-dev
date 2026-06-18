@@ -11,136 +11,178 @@ import {
 } from "react";
 import { getSessionId } from "@/lib/agent-client";
 import {
-  clearDesignChanges,
-  readDesignChanges,
-  subscribeDesignChanges,
-  updateDesignChange,
-  upsertDesignChange,
-  type DesignChange,
-  type DesignChangeDeployStatus,
+  clearDesignState,
+  readDesignState,
+  subscribeDesignState,
+  writeDesignState,
+  type DesignState,
 } from "@/lib/design-changes-store";
+import {
+  applyDraftPatch,
+  clearAllDraftPatches,
+  reapplyDraftPatches,
+  removeDraftPatch,
+  type DesignPatch,
+  type DesignPublishStatus,
+} from "@/lib/design-patch";
 
 type DesignChangesContextValue = {
-  changes: DesignChange[];
-  focusedChange: DesignChange | null;
-  focusChange: (runId: string | null) => void;
+  state: DesignState;
   isAgentBusy: boolean;
-  streamingRunId: string | null;
-  claimStream: (runId: string) => boolean;
-  releaseStream: (runId: string) => void;
-  addChange: (change: Omit<DesignChange, "createdAt" | "deployStatus">) => void;
-  updateDeployStatus: (
-    runId: string,
-    deployStatus: DesignChangeDeployStatus,
-    previewSha?: string | null,
-  ) => void;
-  clearChanges: () => void;
   pendingCount: number;
+  acceptedCount: number;
+  setSelectedDesignId: (designId: string | null) => void;
+  setPendingPatch: (patch: DesignPatch | null) => void;
+  confirmPendingPatch: () => void;
+  rejectPendingPatch: () => void;
+  removeAcceptedPatch: (patchId: string) => void;
+  setPublishStatus: (
+    publishStatus: DesignPublishStatus,
+    publishUrl?: string | null,
+    publishError?: string | null,
+  ) => void;
+  finishPublish: (commitUrl: string) => void;
+  clearSession: () => void;
 };
 
 const DesignChangesContext = createContext<DesignChangesContextValue | null>(null);
 
 export function DesignChangesProvider({ children }: { children: ReactNode }) {
-  const [changes, setChanges] = useState<DesignChange[]>([]);
-  const [focusedRunId, setFocusedRunId] = useState<string | null>(null);
-  const [streamingRunId, setStreamingRunId] = useState<string | null>(null);
-  const [agentSessionActive, setAgentSessionActive] = useState(false);
+  const [state, setState] = useState<DesignState>(() => readDesignState(getSessionId()));
+  const [isAgentBusy, setIsAgentBusy] = useState(false);
 
   const syncFromStore = useCallback(() => {
-    setChanges(readDesignChanges(getSessionId()));
+    setState(readDesignState(getSessionId()));
   }, []);
 
   useEffect(() => {
     syncFromStore();
-    return subscribeDesignChanges(syncFromStore);
+    return subscribeDesignState(syncFromStore);
   }, [syncFromStore]);
 
-  const addChange = useCallback(
-    (change: Omit<DesignChange, "createdAt" | "deployStatus">) => {
-      const items = upsertDesignChange({
-        ...change,
-        createdAt: Date.now(),
-        deployStatus: "working",
+  useEffect(() => {
+    reapplyDraftPatches([
+      ...state.acceptedPatches,
+      ...(state.pendingPatch ? [state.pendingPatch] : []),
+    ]);
+  }, [state.acceptedPatches, state.pendingPatch]);
+
+  const persist = useCallback((patch: Partial<DesignState>) => {
+    const next = writeDesignState(patch, getSessionId());
+    setState(next);
+    return next;
+  }, []);
+
+  const setSelectedDesignId = useCallback(
+    (designId: string | null) => {
+      persist({ selectedDesignId: designId });
+    },
+    [persist],
+  );
+
+  const setPendingPatch = useCallback(
+    (patch: DesignPatch | null) => {
+      if (state.pendingPatch && patch?.id !== state.pendingPatch.id) {
+        removeDraftPatch(state.pendingPatch.id);
+      }
+      if (patch) {
+        applyDraftPatch(patch);
+      }
+      persist({ pendingPatch: patch });
+    },
+    [persist, state.pendingPatch],
+  );
+
+  const confirmPendingPatch = useCallback(() => {
+    if (!state.pendingPatch) return;
+    const accepted = [...state.acceptedPatches, state.pendingPatch];
+    persist({ acceptedPatches: accepted, pendingPatch: null });
+  }, [persist, state.acceptedPatches, state.pendingPatch]);
+
+  const rejectPendingPatch = useCallback(() => {
+    if (!state.pendingPatch) return;
+    removeDraftPatch(state.pendingPatch.id);
+    persist({
+      rejectedPatches: [...state.rejectedPatches, state.pendingPatch],
+      pendingPatch: null,
+    });
+  }, [persist, state.pendingPatch, state.rejectedPatches]);
+
+  const removeAcceptedPatch = useCallback(
+    (patchId: string) => {
+      removeDraftPatch(patchId);
+      persist({
+        acceptedPatches: state.acceptedPatches.filter((patch) => patch.id !== patchId),
       });
-      setChanges(items);
     },
-    [],
+    [persist, state.acceptedPatches],
   );
 
-  const updateDeployStatus = useCallback(
-    (runId: string, deployStatus: DesignChangeDeployStatus, previewSha?: string | null) => {
-      const items = updateDesignChange(runId, { deployStatus, previewSha }, getSessionId());
-      setChanges(items);
+  const setPublishStatus = useCallback(
+    (
+      publishStatus: DesignPublishStatus,
+      publishUrl: string | null = null,
+      publishError: string | null = null,
+    ) => {
+      persist({ publishStatus, publishUrl, publishError });
     },
-    [],
+    [persist],
   );
 
-  const clearChanges = useCallback(() => {
-    clearDesignChanges(getSessionId());
-    setChanges([]);
+  const finishPublish = useCallback(
+    (commitUrl: string) => {
+      clearAllDraftPatches();
+      persist({
+        acceptedPatches: [],
+        pendingPatch: null,
+        rejectedPatches: state.rejectedPatches,
+        publishStatus: "published",
+        publishUrl: commitUrl,
+        publishError: null,
+      });
+    },
+    [persist, state.rejectedPatches],
+  );
+
+  const clearSession = useCallback(() => {
+    clearAllDraftPatches();
+    clearDesignState(getSessionId());
+    setState(readDesignState(getSessionId()));
   }, []);
 
-  const focusChange = useCallback((runId: string | null) => {
-    setFocusedRunId(runId);
-  }, []);
-
-  const focusedChange = useMemo(
-    () => changes.find((change) => change.runId === focusedRunId) ?? null,
-    [changes, focusedRunId],
-  );
-
-  const claimStream = useCallback((runId: string) => {
-    if (streamingRunId && streamingRunId !== runId) {
-      return false;
-    }
-    setStreamingRunId(runId);
-    setAgentSessionActive(true);
-    return true;
-  }, [streamingRunId]);
-
-  const releaseStream = useCallback((runId: string) => {
-    setStreamingRunId((current) => (current === runId ? null : current));
-    setAgentSessionActive(false);
-  }, []);
-
-  const isAgentBusy = useMemo(
-    () =>
-      agentSessionActive ||
-      changes.some((change) => change.deployStatus === "working"),
-    [agentSessionActive, changes],
-  );
-
-  const pendingCount = useMemo(
-    () => changes.filter((change) => change.deployStatus === "working").length,
-    [changes],
-  );
+  const pendingCount = state.pendingPatch ? 1 : 0;
+  const acceptedCount = state.acceptedPatches.length;
 
   const value = useMemo(
     () => ({
-      changes,
-      focusedChange,
-      focusChange,
+      state,
       isAgentBusy,
-      streamingRunId,
-      claimStream,
-      releaseStream,
-      addChange,
-      updateDeployStatus,
-      clearChanges,
       pendingCount,
+      acceptedCount,
+      setSelectedDesignId,
+      setPendingPatch,
+      confirmPendingPatch,
+      rejectPendingPatch,
+      removeAcceptedPatch,
+      setPublishStatus,
+      finishPublish,
+      clearSession,
+      /** Internal — set agent busy during SSE run */
+      _setAgentBusy: setIsAgentBusy,
     }),
     [
-      changes,
-      focusedChange,
-      focusChange,
+      state,
       isAgentBusy,
-      streamingRunId,
-      claimStream,
-      releaseStream,
-      addChange,
-      updateDeployStatus,
-      clearChanges,
       pendingCount,
+      acceptedCount,
+      setSelectedDesignId,
+      setPendingPatch,
+      confirmPendingPatch,
+      rejectPendingPatch,
+      removeAcceptedPatch,
+      setPublishStatus,
+      finishPublish,
+      clearSession,
     ],
   );
 
@@ -155,4 +197,11 @@ export function useDesignChanges() {
     throw new Error("useDesignChanges must be used within DesignChangesProvider");
   }
   return context;
+}
+
+export function useSetAgentBusy() {
+  const context = useContext(DesignChangesContext);
+  if (!context) return () => {};
+  return (context as DesignChangesContextValue & { _setAgentBusy: (busy: boolean) => void })
+    ._setAgentBusy;
 }

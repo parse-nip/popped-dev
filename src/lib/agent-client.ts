@@ -1,10 +1,11 @@
 import { readContributorName } from "@/lib/contributor-name";
-import { clearDesignChanges } from "@/lib/design-changes-store";
+import { clearDesignState } from "@/lib/design-changes-store";
 import {
   MERGE_COOLDOWN_MS,
   setLocalMergeCooldown,
 } from "@/lib/merge-cooldown";
-import type { ElementContext } from "./element-context";
+import type { DesignPatch } from "@/lib/design-patch";
+import { toSelectedElementPayload, type ElementContext } from "./element-context";
 
 const SESSION_ID_KEY = "popped.dev:agent-session-id";
 const AGENT_ID_KEY = "popped.dev:agent-id";
@@ -54,7 +55,7 @@ export function getSessionId(): string {
 
 export function clearAgentSession(): void {
   if (typeof window === "undefined") return;
-  clearDesignChanges(getSessionId());
+  clearDesignState(getSessionId());
   sessionStorage.removeItem(SESSION_ID_KEY);
   sessionStorage.removeItem(AGENT_ID_KEY);
 }
@@ -577,7 +578,195 @@ export async function fetchPreviewUrl(
   };
 }
 
-/** Heuristic Cloudflare Pages preview URL from branch name (used before API resolves). */
+export type DesignStreamEvent =
+  | { type: "status"; message: string }
+  | { type: "step"; id: string; label: string; state: "running" | "done" }
+  | { type: "assistant"; text: string }
+  | { type: "draft_patch"; patch: DesignPatch }
+  | { type: "error"; message: string }
+  | { type: "done"; ok?: boolean };
+
+function parseSseChunk(
+  chunk: string,
+  onEvent: (event: DesignStreamEvent) => void,
+): void {
+  const lines = chunk.split("\n");
+  let eventType = "";
+  let dataRaw = "";
+
+  for (const line of lines) {
+    if (line.startsWith("event:")) {
+      eventType = line.slice(6).trim();
+    } else if (line.startsWith("data:")) {
+      dataRaw += line.slice(5).trim();
+    }
+  }
+
+  if (!eventType || !dataRaw) return;
+
+  try {
+    const data = JSON.parse(dataRaw) as Record<string, unknown>;
+
+    if (eventType === "status" && typeof data.message === "string") {
+      onEvent({ type: "status", message: data.message });
+      return;
+    }
+
+    if (
+      eventType === "step" &&
+      typeof data.id === "string" &&
+      typeof data.label === "string" &&
+      (data.state === "running" || data.state === "done")
+    ) {
+      onEvent({
+        type: "step",
+        id: data.id,
+        label: data.label,
+        state: data.state,
+      });
+      return;
+    }
+
+    if (eventType === "assistant" && typeof data.text === "string") {
+      onEvent({ type: "assistant", text: data.text });
+      return;
+    }
+
+    if (eventType === "draft_patch") {
+      onEvent({ type: "draft_patch", patch: data as unknown as DesignPatch });
+      return;
+    }
+
+    if (eventType === "error" && typeof data.message === "string") {
+      onEvent({ type: "error", message: data.message });
+      return;
+    }
+
+    if (eventType === "done") {
+      onEvent({ type: "done", ok: data.ok === true });
+    }
+  } catch {
+    // ignore malformed chunks
+  }
+}
+
+export async function streamDesignRun(
+  params: {
+    prompt: string;
+    elementContext: ElementContext;
+    acceptedPatches: DesignPatch[];
+  },
+  onEvent: (event: DesignStreamEvent) => void,
+): Promise<void> {
+  const contributorName = getContributorName();
+  if (!contributorName) {
+    throw new Error("Enter your name in the intro section before chatting with the agent.");
+  }
+
+  const response = await fetch(apiUrl("/api/design/run"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: getSessionId(),
+      contributorName,
+      prompt: params.prompt,
+      selectedElement: toSelectedElementPayload(params.elementContext),
+      acceptedPatches: params.acceptedPatches,
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string;
+      message?: string;
+      code?: string;
+      retryAfterSeconds?: number;
+    } | null;
+    if (payload?.code === "requires_code_publish") {
+      throw new Error(payload.message ?? "This change requires a code publish.");
+    }
+    throw parseAgentError(response, payload);
+  }
+
+  if (!response.body) {
+    throw new Error("Design run returned no stream.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+    for (const part of parts) {
+      if (part.trim()) parseSseChunk(part, onEvent);
+    }
+  }
+
+  if (buffer.trim()) parseSseChunk(buffer, onEvent);
+}
+
+export async function fetchDesignBaseSha(): Promise<string> {
+  const response = await fetch(apiUrl("/api/design/status"));
+  if (!response.ok) {
+    throw new Error("Could not fetch publish base SHA.");
+  }
+  const data = (await response.json()) as { baseSha?: string };
+  if (!data.baseSha) {
+    throw new Error("Publish base SHA missing from status response.");
+  }
+  return data.baseSha;
+}
+
+export async function publishDesignPatches(params: {
+  acceptedPatches: DesignPatch[];
+  baseSha: string;
+}): Promise<{ commitUrl: string; patchCount: number }> {
+  const contributorName = getContributorName();
+  if (!contributorName) {
+    throw new Error("Contributor name is required.");
+  }
+
+  const response = await fetch(apiUrl("/api/design/publish"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sessionId: getSessionId(),
+      contributorName,
+      baseSha: params.baseSha,
+      acceptedPatches: params.acceptedPatches,
+    }),
+  });
+
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      error?: string;
+      message?: string;
+      code?: string;
+    } | null;
+    throw new Error(payload?.message ?? payload?.error ?? "Publish failed.");
+  }
+
+  const result = (await response.json()) as {
+    commitUrl?: string;
+    patchCount?: number;
+    cooldownSeconds?: number;
+  };
+
+  const cooldownSeconds = result.cooldownSeconds ?? MERGE_COOLDOWN_MS / 1000;
+  setLocalMergeCooldown(Date.now() + cooldownSeconds * 1000);
+
+  return {
+    commitUrl: result.commitUrl ?? "",
+    patchCount: result.patchCount ?? params.acceptedPatches.length,
+  };
+}
+
+/** Heuristic Cloudflare Pages preview URL from branch name (legacy). */
 export function branchToPreviewUrl(branch: string): string {
   const alias = branch
     .toLowerCase()

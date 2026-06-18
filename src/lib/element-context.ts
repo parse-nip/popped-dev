@@ -1,7 +1,10 @@
 import { getElementLabel } from "./element-label";
+import { designSelector } from "./design-patch";
 
 export type ElementContext = {
   label: string;
+  designId: string;
+  selector: string;
   selectorPath: string;
   factId?: string;
   contributionId?: string;
@@ -9,7 +12,29 @@ export type ElementContext = {
   classNames: string[];
   textPreview: string;
   suggestedFiles: string[];
+  computedStyle: Record<string, string>;
 };
+
+const STYLE_KEYS = [
+  "color",
+  "background-color",
+  "font-size",
+  "font-weight",
+  "font-family",
+  "line-height",
+  "letter-spacing",
+  "padding",
+  "margin",
+  "border-radius",
+  "border",
+  "box-shadow",
+  "opacity",
+  "display",
+  "gap",
+  "width",
+  "max-width",
+  "text-align",
+] as const;
 
 function getSuggestedFiles(
   label: string,
@@ -17,25 +42,18 @@ function getSuggestedFiles(
   contributionId?: string,
 ): string[] {
   if (factId || label === "ProtectedFact") {
-    return [
-      "src/components/locked/LockedResume.tsx",
-      "src/app/globals.css",
-    ];
+    return ["src/app/design-overrides.css"];
   }
 
   if (contributionId || label === "StyledElement") {
-    return [
-      "src/components/locked/LockedResume.tsx",
-      "src/app/globals.css",
-      "src/components/community/",
-    ];
+    return ["src/app/design-overrides.css"];
   }
 
   if (label === "SemanticHeader" || label === "SemanticNav") {
-    return ["src/components/SiteHeader.tsx", "src/app/globals.css"];
+    return ["src/app/design-overrides.css", "src/components/SiteHeader.tsx"];
   }
 
-  return ["src/app/globals.css", "src/components/locked/LockedResume.tsx"];
+  return ["src/app/design-overrides.css"];
 }
 
 function getSelectorPath(element: Element): string {
@@ -44,6 +62,13 @@ function getSelectorPath(element: Element): string {
 
   while (current && current !== document.body) {
     let segment = current.tagName.toLowerCase();
+
+    const designId = current.getAttribute("data-design-id");
+    if (designId) {
+      segment += `[data-design-id="${designId}"]`;
+      segments.unshift(segment);
+      break;
+    }
 
     if (current.id) {
       segment += `#${current.id}`;
@@ -75,13 +100,51 @@ function getTextPreview(element: Element, maxLength = 80): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
+function resolveDesignId(element: Element): string {
+  const explicit = element.getAttribute("data-design-id");
+  if (explicit) return explicit;
+
+  const factId = element.getAttribute("data-fact-id");
+  if (factId) return `fact.${factId}`;
+
+  const contributionId = element.getAttribute("data-contribution-id");
+  if (contributionId) return `styled.${contributionId}`;
+
+  const tag = element.tagName.toLowerCase();
+  const parent = element.parentElement;
+  if (parent) {
+    const siblings = Array.from(parent.children).filter((child) => child.tagName === element.tagName);
+    const index = siblings.indexOf(element);
+    return `${tag}.${index}`;
+  }
+
+  return tag;
+}
+
+function readComputedStyle(element: Element): Record<string, string> {
+  if (typeof window === "undefined") return {};
+
+  const styles = window.getComputedStyle(element);
+  const result: Record<string, string> = {};
+
+  for (const key of STYLE_KEYS) {
+    const value = styles.getPropertyValue(key);
+    if (value) result[key] = value;
+  }
+
+  return result;
+}
+
 export function buildElementContext(element: Element): ElementContext {
   const label = getElementLabel(element);
   const factId = element.getAttribute("data-fact-id") ?? undefined;
   const contributionId = element.getAttribute("data-contribution-id") ?? undefined;
+  const designId = resolveDesignId(element);
 
   return {
     label,
+    designId,
+    selector: designSelector(designId),
     selectorPath: getSelectorPath(element),
     factId,
     contributionId,
@@ -89,5 +152,16 @@ export function buildElementContext(element: Element): ElementContext {
     classNames: Array.from(element.classList),
     textPreview: getTextPreview(element),
     suggestedFiles: getSuggestedFiles(label, factId, contributionId),
+    computedStyle: readComputedStyle(element),
+  };
+}
+
+export function toSelectedElementPayload(context: ElementContext) {
+  return {
+    designId: context.designId,
+    tagName: context.tagName,
+    text: context.textPreview,
+    selector: context.selector,
+    computedStyle: context.computedStyle,
   };
 }

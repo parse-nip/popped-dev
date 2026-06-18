@@ -46,6 +46,7 @@ export type RateLimitRecord = {
 
 export type Env = {
   SESSIONS: KVNamespace;
+  AI?: Ai;
   CURSOR_API_KEY: string;
   GITHUB_TOKEN: string;
   PAGES_PROJECT_NAME: string;

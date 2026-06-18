@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { useDesignMode } from "@/components/design/DesignModeContext";
-import { usePreview } from "@/components/design/PreviewContext";
 import { hasAttribution, resolveContributorName } from "@/lib/contributions";
 
 type TooltipState = {
@@ -51,7 +50,6 @@ function useIsClient() {
 export function ContributionAttributionLayer() {
   const mounted = useIsClient();
   const { isDesignMode } = useDesignMode();
-  const { mode: previewMode } = usePreview();
   const [tooltip, setTooltip] = useState<TooltipState | null>(null);
 
   const clearTooltip = useCallback(() => {
@@ -82,7 +80,7 @@ export function ContributionAttributionLayer() {
   }, []);
 
   useEffect(() => {
-    if (!mounted || isDesignMode || previewMode === "preview") {
+    if (!mounted || isDesignMode) {
       setTooltip(null);
       return;
     }
@@ -104,9 +102,9 @@ export function ContributionAttributionLayer() {
       window.removeEventListener("scroll", handleScroll, true);
       window.removeEventListener("resize", clearTooltip);
     };
-  }, [mounted, isDesignMode, previewMode, updateTooltip, clearTooltip]);
+  }, [mounted, isDesignMode, updateTooltip, clearTooltip]);
 
-  if (!mounted || !tooltip || isDesignMode || previewMode === "preview") {
+  if (!mounted || !tooltip || isDesignMode) {
     return null;
   }
 

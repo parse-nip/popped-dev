@@ -595,6 +595,67 @@
     color: rgba(17, 17, 17, 0.88);
   }
 
+  .your-changes-pending-hint {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(99, 102, 241, 0.08);
+    color: rgba(17, 17, 17, 0.72);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+
+  .your-changes-remove-btn {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    color: rgba(17, 17, 17, 0.52);
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+
+  .your-changes-remove-btn:hover {
+    background: rgba(0, 0, 0, 0.04);
+    color: rgba(17, 17, 17, 0.82);
+  }
+
+  .your-changes-publish-error {
+    margin: 0 0 10px;
+    color: #b42318;
+    font-size: 0.8125rem;
+  }
+
+  .your-changes-publish-success {
+    margin: 0 0 12px;
+    color: rgba(17, 17, 17, 0.72);
+    font-size: 0.8125rem;
+  }
+
+  .your-changes-publish-success a {
+    color: rgba(17, 17, 17, 0.88);
+  }
+
+  .your-changes-panel-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+  }
+
+  .your-changes-enter-design {
+    border: none;
+    background: transparent;
+    color: rgba(17, 17, 17, 0.56);
+    font-size: 0.8125rem;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+  }
+
   .change-run-panel {
     position: fixed;
     right: 24px;
