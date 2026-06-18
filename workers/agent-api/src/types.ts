@@ -46,9 +46,11 @@ export type RateLimitRecord = {
 
 export type Env = {
   SESSIONS: KVNamespace;
-  AI?: Ai;
   CURSOR_API_KEY: string;
   GITHUB_TOKEN: string;
+  OPENROUTER_API_KEY?: string;
+  /** OpenRouter model slug, e.g. openai/gpt-4o-mini */
+  OPENROUTER_MODEL?: string;
   PAGES_PROJECT_NAME: string;
   GITHUB_REPO_URL: string;
   GITHUB_DEFAULT_BRANCH?: string;

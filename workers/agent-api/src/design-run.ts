@@ -13,6 +13,7 @@ import {
   POPPED_LOGO_SVG,
 } from "../../../shared/edit-operations";
 import type { Env } from "./types";
+import { openRouterChat } from "./openrouter";
 
 type RunDesignInput = {
   prompt: string;
@@ -310,29 +311,17 @@ function fallbackPatch(input: RunDesignInput): DesignPatch {
   };
 }
 
-async function callWorkersAi(env: Env, prompt: string): Promise<string | null> {
-  const ai = (env as Env & { AI?: Ai }).AI;
-  if (!ai) return null;
-  try {
-    const response = await ai.run("@cf/meta/llama-3.1-8b-instruct", {
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 1536,
-      temperature: 0.3,
-    });
-    if (typeof response === "string") return response;
-    if (response && typeof response === "object") {
-      const maybe = response as { response?: string; result?: string };
-      return maybe.response ?? maybe.result ?? null;
-    }
-  } catch (error) {
-    console.warn("Workers AI design run failed:", error);
-  }
-  return null;
+async function callDesignLlm(env: Env, prompt: string): Promise<string | null> {
+  const result = await openRouterChat(env, [{ role: "user", content: prompt }], {
+    maxTokens: 2048,
+    temperature: 0.3,
+  });
+  return result.text;
 }
 
 export async function generateDesignPatch(env: Env, input: RunDesignInput): Promise<DesignPatch> {
   const prompt = buildRunPrompt(input);
-  const aiText = await callWorkersAi(env, prompt);
+  const aiText = await callDesignLlm(env, prompt);
 
   if (aiText) {
     const parsed = parseDesignPatch(extractJsonObject(aiText));

@@ -10,6 +10,7 @@ import { DesignSelectLayer } from "@/components/design/DesignSelectLayer";
 import { YourChangesTab } from "@/components/design/YourChangesTab";
 import { SiteHeader } from "@/components/SiteHeader";
 import { ContributionAttributionLayer } from "@/components/community/ContributionAttributionLayer";
+import { ResumeQuickLinks } from "@/components/community/ResumeQuickLinks";
 import { WelcomeIntro } from "@/components/community/WelcomeIntro";
 import { LockedResume } from "@/components/locked/LockedResume";
 import { DesignEmbedListener } from "@/components/design/DesignEmbedListener";
@@ -22,14 +23,17 @@ function HomeContent() {
     <>
       <DesignEmbedListener />
       <DesignModePreviewGuard />
-      <SiteHeader />
-      <DesignStatusMessage />
+      <div className="design-chrome">
+        <SiteHeader />
+        <DesignStatusMessage />
+      </div>
       <div className="design-stage">
         <main
           className={`design-static-layer${showLivePreview ? " design-static-layer--hidden" : ""}`}
           data-design-select-root
         >
           <WelcomeIntro />
+          <ResumeQuickLinks />
           <LockedResume />
         </main>
         <DesignWorkspacePreview />

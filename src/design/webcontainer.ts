@@ -8,6 +8,12 @@ import {
   getDesignModeBlockReason,
 } from "./design-support";
 import { patchPackageJsonForWebContainer } from "./patch-project-for-webcontainer";
+import {
+  createInstallProgressReporter,
+  NpmInstallProgressTracker,
+} from "./install-progress";
+
+export { startDevServer } from "./dev-server";
 
 let webcontainerPromise: Promise<WebContainer> | null = null;
 let webcontainerInstance: WebContainer | null = null;
@@ -102,6 +108,7 @@ export async function installDependenciesForWebContainer(
   container: WebContainer,
   originalPackageJson: string,
   onOutput?: (chunk: string) => void,
+  onProgress?: (percent: number) => void,
 ): Promise<number> {
   await writeFile(container, "package.json", patchPackageJsonForWebContainer(originalPackageJson));
 
@@ -111,8 +118,16 @@ export async function installDependenciesForWebContainer(
     // optional
   }
 
-  const code = await installDependencies(container, onOutput);
+  const reporter = createInstallProgressReporter(originalPackageJson, (percent) =>
+    onProgress?.(percent),
+  );
 
+  const code = await installDependencies(container, (chunk) => {
+    onOutput?.(chunk);
+    reporter.ingest(chunk);
+  });
+
+  reporter.finish();
   await writeFile(container, "package.json", originalPackageJson);
   return code;
 }
@@ -121,7 +136,13 @@ export async function installDependencies(
   container: WebContainer,
   onOutput?: (chunk: string) => void,
 ): Promise<number> {
-  const process = await container.spawn("npm", ["install"]);
+  const process = await container.spawn("npm", [
+    "install",
+    "--no-audit",
+    "--no-fund",
+    "--loglevel=verbose",
+    "--progress=true",
+  ]);
   process.output.pipeTo(
     new WritableStream({
       write(chunk) {
@@ -130,46 +151,6 @@ export async function installDependencies(
     }),
   );
   return process.exit;
-}
-
-export async function startDevServer(
-  container: WebContainer,
-  onOutput?: (chunk: string) => void,
-): Promise<{ url: string; output: string[] }> {
-  const output: string[] = [];
-
-  const urlPromise = new Promise<string>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error("Dev server did not become ready in time."));
-    }, 120_000);
-
-    container.on("server-ready", (port, url) => {
-      clearTimeout(timeout);
-      resolve(url);
-      void port;
-    });
-  });
-
-  // Use the Next version installed in node_modules (15.4.x for WebContainer compatibility).
-  const process = await container.spawn("npx", [
-    "next",
-    "dev",
-    "--hostname",
-    "0.0.0.0",
-    "--port",
-    "3000",
-  ]);
-  process.output.pipeTo(
-    new WritableStream({
-      write(chunk) {
-        output.push(chunk);
-        onOutput?.(chunk);
-      },
-    }),
-  );
-
-  const url = await urlPromise;
-  return { url, output };
 }
 
 export async function readFile(container: WebContainer, path: string): Promise<string> {
@@ -279,6 +260,8 @@ export function pickContextFiles(
     "src/app/design-overrides.css",
     "src/components/SiteHeader.tsx",
     "src/components/locked/LockedResume.tsx",
+    "src/locked/experience.json",
+    "src/components/community/ResumeQuickLinks.tsx",
     ...extraPaths,
   ]);
 
